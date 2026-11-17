@@ -141,5 +141,5 @@ the `stream` entry point looping across the 12 s file boundary with no console e
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The bundled demo track (`public/audio/track.mp3`) is not covered by
-the MIT license.
+MIT — see [LICENSE](LICENSE). The bundled demo track (`public/audio/track.mp3`) was generated with
+YuE2 and is excluded from that licence; see [CREDITS.md](CREDITS.md) for its provenance and terms.
