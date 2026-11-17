@@ -11,7 +11,7 @@
     <title>wave-gpu — play audio, read samples, draw them</title>
     <meta
       name="description"
-      content="Worked example: play browser audio and read the same samples to drive a WebGPU waveform."
+      content="Play audio in the browser and read the same samples to drive a WebGPU waveform."
     />
   </head>
   <body>
@@ -74,19 +74,10 @@
         </dl>
       </section>
 
-      <section class="errors-panel" aria-label="Errors">
+      <section class="errors-panel" id="errors-panel" aria-label="Errors" hidden>
         <h2 class="panel-title">errors</h2>
-        <ul id="errors" class="errors" aria-live="polite">
-          <li class="errors-empty">none</li>
-        </ul>
+        <ul id="errors" class="errors" aria-live="polite"></ul>
       </section>
-
-      <footer class="footer">
-        <p>
-          A worked example, not a product — see
-          <code>docs/architecture.md</code> and <code>docs/browser-audio.md</code>.
-        </p>
-      </footer>
     </main>
 
     <script type="module" src="/src/main.ts"></script>

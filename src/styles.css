@@ -335,6 +335,10 @@ body {
   background: rgba(60, 20, 26, 0.22);
 }
 
+.errors-panel[hidden] {
+  display: none;
+}
+
 .errors-panel .panel-title {
   color: #ffb4b4;
 }
@@ -362,37 +366,6 @@ body {
   position: absolute;
   left: 2px;
   color: var(--danger);
-}
-
-.errors li.errors-empty {
-  color: var(--faint);
-}
-
-.errors li.errors-empty::before {
-  content: "–";
-  color: var(--faint);
-}
-
-/* ---- footer ------------------------------------------------------------- */
-
-.footer {
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 12px;
-}
-
-.footer p {
-  margin: 0;
-}
-
-.footer code {
-  padding: 1px 5px;
-  border: 1px solid var(--line-soft);
-  border-radius: 5px;
-  background: var(--bg-raised);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11.5px;
 }
 
 /* ---- responsive --------------------------------------------------------- */

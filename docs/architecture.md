@@ -1,6 +1,6 @@
 # Architecture
 
-This is a worked example, not a product. The code is organised around one idea:
+The code is organised around one idea:
 
 > **Playing audio and reading audio are separate concerns.**
 > The browser's Web Audio graph is the meeting point: any *ingest* path connects to the same

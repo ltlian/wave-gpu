@@ -2,10 +2,12 @@
 
 **Play audio in the browser, read the same samples, and draw them with WebGPU.**
 
-A small, dependency-light worked example of a question that comes up whenever you want audio to
-drive something visual: *how do I play audio in the browser while also getting at the stream?*
+A small, dependency-light project: play audio in the browser while also getting at the stream, to
+drive something visual. Three ways of getting audio into the Web Audio graph — an `<audio>` element,
+a fully decoded buffer, and raw PCM streamed from the dev server — all feed the same tap, which
+feeds a WebGPU waveform.
 
-The answer has three independent layers, and this repo keeps them separate:
+The design has three independent layers, and this repo keeps them separate:
 
 ```
 ingest (playback)  →  tap (read)  →  consume (WebGPU)
@@ -77,9 +79,7 @@ Longer write-ups:
   etc. drive it programmatically (after a real user gesture has unlocked audio, or in a headless
   automation context).
 
-## Status
-
-Exploration-grade, intentionally small, no runtime dependencies, no production hardening.
+## Verification
 
 Verified in Chrome 157 in the host browser, over the dev server **and** the production build:
 `webgpu` backend active with no shader errors, 60 fps, `crossOriginIsolated` + a real
@@ -91,4 +91,4 @@ gain. The browser/GPU pipeline is verified manually rather than unit-tested.
 
 ## License
 
-No license file yet — treat it as a personal exploration unless one is added.
+MIT — see [LICENSE](LICENSE).

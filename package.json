@@ -3,7 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Worked example: play audio in the browser and read the same samples to drive a WebGPU waveform.",
+  "description": "Play audio in the browser and read the same samples to drive a WebGPU waveform.",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",

@@ -2,9 +2,8 @@
  * The error strip: a tiny append-only log under the stage.
  *
  * Everything that goes wrong in the app funnels here (audio failures, WebGPU
- * diagnostics, window errors wired up in `main.ts`). It is deliberately simple:
- * newest at the bottom, no throwing when the list is missing, and the marker
- * `<li class="errors-empty">none</li>` is dropped as soon as something arrives.
+ * diagnostics, window errors wired up in `main.ts`). The panel stays hidden
+ * while there is nothing to show and appears on the first message.
  */
 
 /** How many messages the panel keeps; older ones fall off the top. */
@@ -16,8 +15,13 @@ export interface ErrorStrip {
 }
 
 export function createErrorStrip(root: ParentNode): ErrorStrip {
+  const panelElement = root.querySelector<HTMLElement>('#errors-panel');
   const listElement = root.querySelector<HTMLElement>('#errors');
   const messages: string[] = [];
+
+  function updateVisibility(): void {
+    if (panelElement) panelElement.hidden = messages.length === 0;
+  }
 
   function add(message: string): void {
     const text = message.trim();
@@ -29,19 +33,21 @@ export function createErrorStrip(root: ParentNode): ErrorStrip {
     messages.push(text);
     while (messages.length > MAX_MESSAGES) messages.shift();
 
-    if (!listElement) return;
-    listElement.querySelector('.errors-empty')?.remove();
-    const item = document.createElement('li');
-    item.textContent = text;
-    listElement.append(item);
-    while (listElement.children.length > MAX_MESSAGES) {
-      listElement.firstElementChild?.remove();
+    if (listElement) {
+      const item = document.createElement('li');
+      item.textContent = text;
+      listElement.append(item);
+      while (listElement.children.length > MAX_MESSAGES) {
+        listElement.firstElementChild?.remove();
+      }
     }
+    updateVisibility();
   }
 
   function list(): string[] {
     return messages.slice();
   }
 
+  updateVisibility();
   return { add, list };
 }
