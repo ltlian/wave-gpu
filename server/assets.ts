@@ -1,13 +1,11 @@
 /**
- * The audio assets shared by every endpoint in the plugin.
+ * The audio assets shared by the plugin's endpoints.
  *
- * Rendering the loop and encoding it is cheap enough to do at startup but
- * expensive enough that re-doing it per request would be rude (and would make
- * the WAV's `ETag`-less `Range` support pointless). Everything is generated
- * once per process and cached; the buffers are treated as read-only.
+ * Rendering the loop is cheap enough to do at startup but expensive enough that
+ * re-doing it per request would be rude. Everything is generated once per
+ * process and cached; the buffers are treated as read-only.
  */
 
-import { encodeWav16 } from './wav.ts';
 import { renderTrack } from './synth.ts';
 
 /** JSON body served by `GET /api/meta`. */
@@ -23,8 +21,6 @@ export interface AudioMeta {
 /** Everything the HTTP endpoints need, rendered on first access. */
 export interface AudioAssets {
   meta: AudioMeta;
-  /** Complete 16-bit PCM WAV file. */
-  wav: Buffer;
   /** Interleaved stereo f32le samples (`/stream/pcm` payload). */
   pcm: Buffer;
 }
@@ -57,7 +53,6 @@ function buildAudioAssets(): AudioAssets {
       durationSeconds: track.durationSeconds,
       loop: true,
     },
-    wav: encodeWav16(track.channelsData, track.sampleRate),
     pcm: interleaveF32LE(track.channelsData),
   };
 }

@@ -11,9 +11,9 @@
  * twice for the same element, so it is cached and merely disconnected on stop.
  */
 
+import { TRACK_URL } from '../tracks.ts';
 import type { AudioSource, SourceStats } from '../../types.ts';
 
-const TRACK_URL = '/audio/track.wav';
 const ZERO_STATS: SourceStats = { bytes: 0, chunks: 0 };
 
 function describeError(error: unknown): string {
@@ -36,7 +36,7 @@ export function createElementSource(onError: (message: string) => void = () => {
   element.addEventListener('error', () => {
     if (reportedLoadError) return;
     reportedLoadError = true;
-    onError(`could not load ${TRACK_URL} in the <audio> element (is the dev server running?)`);
+    onError(`could not load ${TRACK_URL} in the <audio> element`);
   });
 
   return {

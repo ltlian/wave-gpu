@@ -76,6 +76,7 @@ export function createReadout(root: ParentNode): Readout {
     const contextLabel = contextIdle ? 'idle' : state.contextState;
 
     setField('entry', state.entry ?? NO_VALUE);
+    setField('track', state.track.length > 0 ? state.track : NO_VALUE);
     setField('file', formatFile(state.file));
     setField('tap', state.tap);
     setField('context-state', contextIdle ? 'not created' : state.contextState);

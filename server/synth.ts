@@ -1,5 +1,5 @@
 /**
- * Deterministic synthesizer for the example track.
+ * Deterministic synthesizer for the stream demo's loop.
  *
  * The loop is 12 s, 48 kHz, stereo, 100 BPM in 4/4 — exactly 20 beats / 5 bars,
  * so it restarts on a downbeat. Four voices make it sound like a piece of music
@@ -273,7 +273,7 @@ function finalize(
   return { left: outLeft, right: outRight };
 }
 
-/** Render the 12 s demo loop. Byte-identical on every call and in every process. */
+/** Render the 12 s stream-demo loop. Byte-identical on every call and in every process. */
 export function renderTrack(): Track {
   const mixLeft = new Float32Array(FRAMES + TAIL_FRAMES);
   const mixRight = new Float32Array(FRAMES + TAIL_FRAMES);

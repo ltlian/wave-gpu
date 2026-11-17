@@ -31,7 +31,7 @@ This project implements the first three plus local files:
   The browser handles HTTP, buffering and decoding. Latency includes media buffering, so it is
   ideal for visualization but not sample-accurate. A CORS-cross-origin element tapped this way
   outputs **silence**.
-- `sources/decoded-buffer-source.ts` — `fetch('/audio/track.wav')` → `decodeAudioData()` → looping
+- `sources/decoded-buffer-source.ts` — `fetch('/audio/track.mp3')` → `decodeAudioData()` → looping
   `AudioBufferSourceNode`. This is the simplest way to get *all* PCM (`buffer.getChannelData()`),
   at the cost of holding it in memory. `decodeAudioData` resamples to the context rate.
 - `sources/stream-source.ts` — `fetch('/stream/pcm')` + `ReadableStream`, raw `f32le` interleaved
@@ -44,7 +44,7 @@ This project implements the first three plus local files:
   and a WAV need no different handling in our code. Metadata (`duration`) comes from
   `loadedmetadata`; long files stream from disk. The alternative for a local file is
   `fetch`-equivalent `file.arrayBuffer()` → `decodeAudioData()` if you specifically want all the
-  PCM in memory (that is what the `decode` entry point demonstrates for the server track).
+  PCM in memory (that is what the `decode` entry point demonstrates for the bundled track).
 
 ## Ways to read the live stream
 

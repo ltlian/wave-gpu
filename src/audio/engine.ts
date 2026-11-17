@@ -29,7 +29,7 @@ import { createWorkletTap } from './taps/worklet-tap.ts';
 import type { FileSource } from './sources/file-source.ts';
 import type { WorkletTap } from './taps/worklet-tap.ts';
 
-/** Master gain: the synth loop is rendered close to full scale. */
+/** Master gain: headroom for the bundled track and the full-scale synth loop. */
 const MASTER_GAIN = 0.35;
 /** Entry point used by the first Start click (before one is chosen). */
 const DEFAULT_ENTRY: EntryPointId = 'element';

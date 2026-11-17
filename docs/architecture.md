@@ -81,7 +81,8 @@ the worklet falls back to transferring a mono `Float32Array` over `postMessage` 
 
 ### Stream scheduling (`stream-source.ts`)
 
-`/stream/pcm` is raw, headerless PCM: interleaved stereo `f32le`, 48 kHz, 20 ms chunks. The client
+`/stream/pcm` is raw, headerless PCM: interleaved stereo `f32le`, 48 kHz, 20 ms chunks (a
+synthesized 12 s loop — see above). The client
 does not trust fetch chunk boundaries — it keeps leftover bytes and only decodes whole 8-byte
 stereo frames. Playback is scheduled as small `AudioBuffer`s (created with `sampleRate: 48000`)
 against `ctx.currentTime`, with a ~0.25 s prebuffer and ~0.2 s lookahead. If the playhead overtakes
@@ -108,13 +109,17 @@ drag-over stage state) lives in `src/ui/file-drop.ts`.
 
 ### The producer (`server/`)
 
-The dev server is a small Vite plugin, not a second process. It synthesizes a deterministic 12 s
-loop (100 BPM, Am–F–C–G–Em) at startup, encodes it as 16-bit PCM WAV for `/audio/track.wav`, and
-interleaves the same floats for `/stream/pcm`. It also sets the isolation headers. Everything is
+The page's track is a bundled MP3 served as a static file; [`src/audio/tracks.ts`](../src/audio/tracks.ts)
+points the `element` and `decode` sources at it. The `stream` entry deliberately does not use it:
+raw f32 samples of the 3:29 track would be ~80 MB, so that entry plays a short synthesized loop
+instead — the same 12 s, 100 BPM, Am–F–C–G–Em piece, rendered by `server/synth.ts`.
+
+For that loop the dev server is a small Vite plugin, not a second process: it synthesizes the loop
+at startup, interleaves the floats for `/stream/pcm`, and sets the isolation headers. Everything is
 rendered once per process and cached.
 
 A deployed site has no process, so `scripts/build-audio.ts` renders the same loop at build time and
-writes the three responses into `dist/` as files (`audio/track.wav`, `stream/pcm`, `api/meta`);
+writes `stream/pcm` and `api/meta` into `dist/`; the MP3 is copied there by Vite from `public/`, and
 `public/_headers` supplies the isolation headers that the plugin sets in dev. The result is a
 purely static deployment — see the Deploy section of the README.
 
@@ -163,7 +168,9 @@ the production build — audio worklets cannot load that.)
 | `src/gpu/display-gain.ts` | pure rolling-peak normalisation (unit-tested) |
 | `src/ui/*.ts` | controls, readout, error strip, file drop/picker (DOM only) |
 | `server/audio-plugin.ts` | Vite middleware + audio endpoints |
-| `server/synth.ts`, `wav.ts`, `assets.ts` | deterministic track, WAV encoder, cached assets |
+| `server/synth.ts`, `assets.ts` | deterministic loop, cached assets |
+| `src/audio/tracks.ts` | the bundled MP3 and the stream loop's labels |
+| `public/audio/track.mp3` | the bundled demo track (not MIT — see README) |
 | `shared/audio.ts` | constants shared by browser and server |
 
 ## Extending it

@@ -112,6 +112,8 @@ export interface AudioEngine {
 /** Snapshot the UI needs to render the live readout. */
 export interface ReadoutState {
   entry: EntryPointId | null;
+  /** Which audio the engine is playing: the bundled track, the stream loop. */
+  track: string;
   file: FileInfo | null;
   tap: TapId;
   playing: boolean;

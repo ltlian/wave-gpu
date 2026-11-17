@@ -1,5 +1,5 @@
 /**
- * Vite plugin that serves the example's audio endpoints.
+ * Vite plugin that serves the example's dynamic audio endpoints.
  *
  * The same plugin instance is used by `npm run dev` and `npm run preview`, so it
  * installs its middleware through both `configureServer` and
@@ -15,8 +15,12 @@
  *
  * Endpoints:
  *   GET|HEAD /api/meta         JSON description of the loop (unknown /api/** → 404)
- *   GET|HEAD /audio/track.wav  16-bit PCM WAV, single byte range → 206, bad → 416
  *   GET      /stream/pcm       paced raw f32le interleaved stereo, loops forever
+ *
+ * The page's demo track (`/audio/track.mp3`) is a plain static file, not an
+ * endpoint, so Vite serves it from `public/` here and the built site serves it
+ * from `dist/`. The synthesized loop exists only for the raw-PCM stream demo;
+ * see `src/audio/tracks.ts` for why the stream entry does not use the MP3.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -26,7 +30,6 @@ import { STREAM_CHUNK_FRAMES, STREAM_INTERVAL_MS } from '../shared/audio.ts';
 import { getAudioAssets } from './assets.ts';
 
 const META_PATH = '/api/meta';
-const WAV_PATH = '/audio/track.wav';
 const STREAM_PATH = '/stream/pcm';
 
 const FLOAT32_BYTES = 4;
@@ -35,7 +38,7 @@ const FLOAT32_BYTES = 4;
  * Headers that must accompany every response. COOP+COEP are what make the page
  * cross-origin isolated (required for the SharedArrayBuffer worklet ring); CORP
  * keeps those headers from breaking same-origin subresources; no-store stops the
- * media element / fetch cache from hiding changes to the generated track.
+ * media element / fetch cache from hiding changes to the generated loop.
  */
 const BASE_HEADERS: Readonly<Record<string, string>> = {
   'Cross-Origin-Opener-Policy': 'same-origin',
@@ -43,11 +46,6 @@ const BASE_HEADERS: Readonly<Record<string, string>> = {
   'Cross-Origin-Resource-Policy': 'same-origin',
   'Cache-Control': 'no-store',
 };
-
-interface ByteRange {
-  start: number;
-  end: number;
-}
 
 /** Pathname of the request, or null when the URL cannot be parsed. */
 function parsePathname(requestUrl: string | undefined): string | null {
@@ -98,37 +96,6 @@ function sendMethodNotAllowed(req: IncomingMessage, res: ServerResponse, allow: 
   sendText(req, res, 405, 'Method Not Allowed\n', { Allow: allow });
 }
 
-/**
- * Parse one HTTP `Range` header against a known total size.
- *
- * Returns `null` when there is no range (serve 200), a `ByteRange` for a single
- * satisfiable range (serve 206), or `'invalid'` (serve 416). Multi-range
- * requests are treated as invalid on purpose: the only consumer of this file is
- * an `<audio>` element / `decodeAudioData`, both of which ask for a single range,
- * and implementing multipart/byteranges would add complexity for no benefit.
- */
-function parseRange(header: string | undefined, total: number): ByteRange | 'invalid' | null {
-  if (header === undefined || header === '') return null;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
-  if (match === null || (match[1] === '' && match[2] === '')) return 'invalid';
-
-  let start: number;
-  let end: number;
-  if (match[1] === '') {
-    // Suffix form `bytes=-500`: the last 500 bytes.
-    const suffix = Number(match[2]);
-    if (!Number.isSafeInteger(suffix) || suffix <= 0) return 'invalid';
-    start = Math.max(0, total - suffix);
-    end = total - 1;
-  } else {
-    start = Number(match[1]);
-    end = match[2] === '' ? total - 1 : Math.min(Number(match[2]), total - 1);
-  }
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return 'invalid';
-  if (start < 0 || start >= total || start > end) return 'invalid';
-  return { start, end };
-}
-
 /** `GET|HEAD /api/meta` — the loop's JSON description. */
 function handleMeta(req: IncomingMessage, res: ServerResponse): void {
   if (!isReadMethod(req)) {
@@ -137,49 +104,6 @@ function handleMeta(req: IncomingMessage, res: ServerResponse): void {
   }
   const { meta } = getAudioAssets();
   sendBody(req, res, 200, 'application/json; charset=utf-8', Buffer.from(JSON.stringify(meta)));
-}
-
-/**
- * `GET|HEAD /audio/track.wav` — the encoded loop with single-range support.
- *
- * `Accept-Ranges: bytes` advertises support; a well-formed `Range` yields a 206
- * with a `Content-Range` header describing the served slice, while a malformed
- * or unsatisfiable range yields a 416 whose `Content-Range` declares the full
- * length as unsatisfiable.
- */
-function handleWav(req: IncomingMessage, res: ServerResponse): void {
-  if (!isReadMethod(req)) {
-    sendMethodNotAllowed(req, res, 'GET, HEAD');
-    return;
-  }
-  const { wav } = getAudioAssets();
-  const total = wav.length;
-  const range = parseRange(req.headers.range, total);
-
-  if (range === 'invalid') {
-    sendText(req, res, 416, 'Range not satisfiable\n', {
-      'Accept-Ranges': 'bytes',
-      'Content-Range': `bytes */${total}`,
-    });
-    return;
-  }
-  if (range === null) {
-    res.writeHead(200, {
-      'Content-Type': 'audio/wav',
-      'Accept-Ranges': 'bytes',
-      'Content-Length': String(total),
-    });
-    res.end(req.method === 'HEAD' ? undefined : wav);
-    return;
-  }
-  const body = wav.subarray(range.start, range.end + 1); // subarray: no copy of the file
-  res.writeHead(206, {
-    'Content-Type': 'audio/wav',
-    'Accept-Ranges': 'bytes',
-    'Content-Length': String(body.length),
-    'Content-Range': `bytes ${range.start}-${range.end}/${total}`,
-  });
-  res.end(req.method === 'HEAD' ? undefined : body);
 }
 
 /**
@@ -263,8 +187,8 @@ function audioMiddleware(
   res: ServerResponse,
   next: Connect.NextFunction,
 ): void {
-  // Set before dispatch so our own 404/416/405 and Vite's responses all carry
-  // the isolation headers (Node merges these into the later writeHead call).
+  // Set before dispatch so our own 404/405 and Vite's responses all carry the
+  // isolation headers (Node merges these into the later writeHead call).
   for (const name of Object.keys(BASE_HEADERS)) res.setHeader(name, BASE_HEADERS[name]);
 
   const pathname = parsePathname(req.url);
@@ -275,10 +199,6 @@ function audioMiddleware(
 
   if (pathname === META_PATH) {
     handleMeta(req, res);
-    return;
-  }
-  if (pathname === WAV_PATH) {
-    handleWav(req, res);
     return;
   }
   if (pathname === STREAM_PATH) {

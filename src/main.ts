@@ -16,6 +16,7 @@ import { createErrorStrip } from './ui/errors.ts';
 import { createFileDrop } from './ui/file-drop.ts';
 import { createReadout } from './ui/readout.ts';
 import { installDebugHook } from './debug.ts';
+import { STREAM_LOOP_LABEL, TRACK_LABEL } from './audio/tracks.ts';
 import { createIdlePreview } from './idle-preview.ts';
 import { FRAME_SAMPLES } from '../shared/audio.ts';
 import type { AudioEngine, EntryPointId, ReadoutState, TapId, Visualizer } from './types.ts';
@@ -72,6 +73,14 @@ const controls = createControls(document, {
   },
 });
 const readout = createReadout(document);
+
+/** What is audible, as opposed to how it got there (`entry`). */
+function describeTrack(entry: EntryPointId | null): string {
+  if (entry === 'stream') return STREAM_LOOP_LABEL;
+  if (entry === 'file') return 'local file';
+  if (entry === 'element' || entry === 'decode') return TRACK_LABEL;
+  return '';
+}
 
 let playing = false;
 let busy = false;
@@ -142,6 +151,7 @@ function updateReadout(): void {
   const analyser = engine.getTap('analyser');
   const state: ReadoutState = {
     entry: engine.activeEntry,
+    track: describeTrack(engine.activeEntry),
     file: engine.file,
     tap: engine.activeTap,
     playing,

@@ -7,9 +7,9 @@
  * switching away and back does not download or decode again.
  */
 
+import { TRACK_URL } from '../tracks.ts';
 import type { AudioSource, SourceStats } from '../../types.ts';
 
-const TRACK_URL = '/audio/track.wav';
 const ZERO_STATS: SourceStats = { bytes: 0, chunks: 0 };
 
 function describeError(error: unknown): string {

@@ -7,14 +7,19 @@ drive something visual. Four ways of getting audio into the Web Audio graph — 
 a fully decoded buffer, raw PCM streamed from a server (a Vite plugin in dev, a static file when
 deployed), and a local file you drop in — all feed the same tap, which feeds a WebGPU waveform.
 
+The page's track is a real MP3 bundled with the site, played by the `element` and `decode` entries.
+The raw-PCM `stream` entry plays a short synthesized loop instead: streaming the whole song as
+headerless f32 samples would be ~80 MB, which is exactly the trade-off that entry demonstrates.
+
 The design has three independent layers, and this repo keeps them separate:
 
 ```
 ingest (playback)  →  tap (read)  →  consume (WebGPU)
 ```
 
-- **Four entry points** — an `<audio>` element, a fully decoded `AudioBuffer`, raw PCM streamed from
-  a server, and a local file you drop or pick. Switch between them while audio plays.
+- **Four entry points** — an `<audio>` element and a fully decoded `AudioBuffer` (both on the
+  bundled MP3), raw PCM streamed as a synthesized 12 s loop, and a local file you drop or pick.
+  Switch between them while audio plays.
 - **Two read paths** — an `AnalyserNode` (easy, windowed) and an `AudioWorklet` (exact contiguous
   frames) publishing through a `SharedArrayBuffer` ring.
 - **One GPU consumer** — a 2048-sample frame → compute pass → fragment-shader waveform, with a
@@ -23,7 +28,7 @@ ingest (playback)  →  tap (read)  →  consume (WebGPU)
 The point is the seams: every entry point feeds the same gain node, so either tap works with all
 of them, and swapping the consumer never touches the audio code.
 
-![wave-gpu running: WebGPU waveform, the local-file entry point active, SAB ring live](docs/demo.png)
+![wave-gpu running: WebGPU waveform, the bundled track playing through the element entry point, SAB ring live](docs/demo.png)
 
 ## Run it
 
@@ -34,19 +39,20 @@ npm run dev        # http://127.0.0.1:5173
 
 Click **Start**, then switch **entry point** and **read path** while it plays. Drop an audio file
 anywhere on the page (or use **Load file…**) to play your own track. The live readout shows the
-loaded file, both taps' RMS/peak, the context rate/latency, whether the shared ring is active, the
-GPU backend and the display gain.
+entry point, which track it is playing, both taps' RMS/peak, the context rate/latency, whether the
+shared ring is active, the GPU backend and the display gain.
 
 ```bash
-npm test           # node:test — pure logic: synth, WAV encoding, PCM chunking, display gain
+npm test           # node:test — pure logic: synth, PCM chunking, display gain
 npm run typecheck  # tsc for the browser app and for the Node/dev-server side
 npm run build      # typecheck + production bundle
 npm run preview    # http://127.0.0.1:5174 — same demo from the built assets
 ```
 
-The audio endpoints (`/api/meta`, `/audio/track.wav`, `/stream/pcm`) are served by a tiny Vite
-plugin in [`server/audio-plugin.ts`](server/audio-plugin.ts), so the dev server is the only
-process you need. The same plugin runs for `vite preview`.
+The dynamic endpoints (`/api/meta`, `/stream/pcm`) are served by a tiny Vite plugin in
+[`server/audio-plugin.ts`](server/audio-plugin.ts), so the dev server is the only process you need.
+The same plugin runs for `vite preview`. The bundled track is a plain static file in
+[`public/audio/`](public/audio/), so Vite serves it in dev and the built site serves it from `dist/`.
 
 ## Deploy
 
@@ -59,9 +65,9 @@ npm run deploy     # runs `wrangler deploy`, which builds first (see wrangler.js
 
 Two details make a static host enough:
 
-- [`scripts/build-audio.ts`](scripts/build-audio.ts) runs after `vite build` and renders the loop
-  once into `dist/`: `audio/track.wav`, `stream/pcm` (the interleaved f32le samples) and
-  `api/meta`. The synth and WAV encoder are shared with the dev server.
+- [`scripts/build-audio.ts`](scripts/build-audio.ts) runs after `vite build` and renders the stream
+  loop once into `dist/`: `stream/pcm` (the interleaved f32le samples) and `api/meta`. The synth is
+  shared with the dev server. The MP3 is copied by Vite from `public/`.
 - [`public/_headers`](public/_headers) sets the COOP/COEP/CORP isolation headers on every asset,
   which is what gives the deployed page a real `SharedArrayBuffer` ring.
 
@@ -79,7 +85,8 @@ deployment free of any per-request compute: every request is served by Cloudflar
 | how a dropped file becomes audio | [`src/audio/sources/file-source.ts`](src/audio/sources/file-source.ts) + [`src/ui/file-drop.ts`](src/ui/file-drop.ts) |
 | how the live stream is tapped | [`src/audio/taps/`](src/audio/taps/) and [`src/audio/worklet/capture-worklet.ts`](src/audio/worklet/capture-worklet.ts) |
 | how samples become pixels | [`src/gpu/webgpu.ts`](src/gpu/webgpu.ts) + [`src/gpu/shaders.ts`](src/gpu/shaders.ts) |
-| how the demo server works | [`server/`](server/) — deterministic synth, WAV encoder, stream endpoints |
+| which audio the demo ships with | [`src/audio/tracks.ts`](src/audio/tracks.ts) |
+| how the demo server works | [`server/`](server/) — deterministic synth, stream endpoints |
 
 Longer write-ups:
 
@@ -90,9 +97,11 @@ Longer write-ups:
 
 ## Notes on the implementation
 
-- The track is **synthesized deterministically at server startup** (100 BPM, 12 s, Am–F–C–G–Em)
-  and encoded to 16-bit PCM WAV by hand — no audio files in the repo, byte-identical on every run.
-  The same float samples feed the raw PCM stream, so what you see is exactly what you hear.
+- The page's track is a **bundled MP3** (`public/audio/track.mp3`, 3:29, 48 kHz). The raw-PCM
+  `stream` entry instead plays a **synthesized 12 s loop** (100 BPM, Am–F–C–G–Em, rendered
+  deterministically by `server/synth.ts`): streaming the whole song as headerless f32 samples would
+  be ~80 MB, which is the trade-off that entry point exists to show. The readout's `track` row says
+  which one is playing.
 - **Local files are never parsed by this code.** A dropped/picked `File` becomes a same-origin
   `blob:` URL and goes through the browser's normal `<audio>` pipeline, then
   `MediaElementAudioSourceNode`. That is format-agnostic by design: MP3, AAC/M4A, Ogg/Opus, FLAC,
@@ -114,18 +123,19 @@ Longer write-ups:
 
 Verified in Chrome 157 in the host browser, over the dev server **and** the production build:
 `webgpu` backend active with no shader errors, 60 fps, `crossOriginIsolated` + a real
-`SharedArrayBuffer` ring, all four entry points audible/visible, both read paths showing live
-RMS/peak, zero console errors or exceptions. Local-file playback was exercised through both the
-drop handler and the picker path with **WAV** (48 kHz) and **MP3** (44.1 kHz); unsupported files
-surface a clean error. The host `AudioContext` came up at 44100 Hz while the server track is
-48 kHz — a nice live demonstration of the resampling path in `docs/browser-audio.md`.
+`SharedArrayBuffer` ring, all four entry points audible/visible (the MP3 for `element` and `decode`,
+the synth loop for `stream`), both read paths showing live RMS/peak, zero console errors or
+exceptions. Local-file playback was exercised through both the drop handler and the picker path
+with **WAV** (48 kHz) and **MP3** (44.1 kHz); unsupported files surface a clean error. The host
+`AudioContext` came up at 44100 Hz while the loop is produced at 48 kHz — a nice live demonstration
+of the resampling path in `docs/browser-audio.md`.
 The deployed site was verified the same way: `wave.ltlian.com` served with `crossOriginIsolated`
-and a live SAB ring, `webgpu` backend, 60 fps, and the `stream` entry point looping across the
-12 s file boundary with no console errors.
+and a live SAB ring, `webgpu` backend, 60 fps, the MP3 playing through `element` and `decode`, and
+the `stream` entry point looping across the 12 s file boundary with no console errors.
 
-`npm test` (34 tests) covers the pure logic: synth determinism, WAV encoding, PCM chunking, display
-gain. The browser/GPU pipeline is verified manually rather than unit-tested.
+`npm test` (29 tests) covers the pure logic: synth determinism, PCM chunking, display gain. The browser/GPU pipeline is verified manually rather than unit-tested.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The bundled demo track (`public/audio/track.mp3`) is not covered by
+the MIT license.
