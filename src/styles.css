@@ -441,3 +441,21 @@ body {
     transition: none;
   }
 }
+
+.credits {
+  margin: 14px 2px 0;
+  font-size: 0.78rem;
+  color: var(--faint);
+  text-align: right;
+}
+
+.credits a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+}
+
+.credits a:hover {
+  color: var(--cyan);
+}

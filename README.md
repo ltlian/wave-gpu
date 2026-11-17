@@ -7,7 +7,8 @@ drive something visual. Four ways of getting audio into the Web Audio graph — 
 a fully decoded buffer, raw PCM streamed from a server (a Vite plugin in dev, a static file when
 deployed), and a local file you drop in — all feed the same tap, which feeds a WebGPU waveform.
 
-The page's track is a real MP3 bundled with the site, played by the `element` and `decode` entries.
+The page's track is a real MP3 bundled with the site, played by the `element` and `decode` entries
+(generated with YuE2 — see [CREDITS.md](CREDITS.md)).
 The raw-PCM `stream` entry plays a short synthesized loop instead: streaming the whole song as
 headerless f32 samples would be ~80 MB, which is exactly the trade-off that entry demonstrates.
 
@@ -143,3 +144,8 @@ the `stream` entry point looping across the 12 s file boundary with no console e
 
 MIT — see [LICENSE](LICENSE). The bundled demo track (`public/audio/track.mp3`) was generated with
 YuE2 and is excluded from that licence; see [CREDITS.md](CREDITS.md) for its provenance and terms.
+
+## AI disclosure
+
+This application was built with the DeepSeek Harness agent running DeepSeek Flash v4.1; see
+[AI_DISCLOSURE.md](AI_DISCLOSURE.md) for the scope and level of AI involvement.
