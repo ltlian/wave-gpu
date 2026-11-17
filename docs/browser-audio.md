@@ -18,13 +18,14 @@ loading the whole file is optional.
 | Entry point | What you get | Best for | Main limit |
 |---|---|---|---|
 | `<audio src>` + `MediaElementAudioSourceNode` | browser-managed progressive HTTP + decode | playing a URL | not sample-exact; CORS rules |
+| **local `File`** + a `blob:` URL → the same `<audio>` path | any file the browser can decode, streamed from disk | user-provided audio, MP3/WAV/…, large files | no format access in JS; decoder support varies |
 | `fetch` + `decodeAudioData` → `AudioBufferSourceNode` | the whole file decoded to PCM in memory | "I want all samples" | must download first; memory |
 | `fetch`/WebSocket/WebTransport raw PCM → scheduled buffers | you own the clock and the bytes | low latency, no decoder | you handle pacing/drift |
 | Media Source Extensions (`SourceBuffer`) | segmented compressed stream into an element | long/live/adaptive (HLS/DASH) | needs segments; tap via element |
 | WebCodecs `AudioDecoder` | compressed chunks → decoded `AudioData` | compressed transport *and* samples | you demux the container |
 | `getUserMedia` / `MediaStreamAudioSourceNode` | mic / line-in | live input | device latency; permission |
 
-This project implements the first three:
+This project implements the first three plus local files:
 
 - `sources/element-source.ts` — `<audio>` element, `createMediaElementSource()`, `loop`, `play()`.
   The browser handles HTTP, buffering and decoding. Latency includes media buffering, so it is
@@ -37,6 +38,13 @@ This project implements the first three:
   stereo, reassembled across arbitrary chunk boundaries and scheduled as small `AudioBuffer`s
   against `ctx.currentTime`. No decoder: the bytes *are* the samples. You own pacing, prebuffering
   and drift handling.
+- `sources/file-source.ts` — a user-dropped or picked `File` wrapped in a same-origin `blob:` URL,
+  played through the same `<audio>` element path as above. This is **format-agnostic by design**:
+  the browser's media stack demuxes and decodes whichever container/codec it supports, so an MP3
+  and a WAV need no different handling in our code. Metadata (`duration`) comes from
+  `loadedmetadata`; long files stream from disk. The alternative for a local file is
+  `fetch`-equivalent `file.arrayBuffer()` → `decodeAudioData()` if you specifically want all the
+  PCM in memory (that is what the `decode` entry point demonstrates for the server track).
 
 ## Ways to read the live stream
 

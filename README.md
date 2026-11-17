@@ -3,9 +3,9 @@
 **Play audio in the browser, read the same samples, and draw them with WebGPU.**
 
 A small, dependency-light project: play audio in the browser while also getting at the stream, to
-drive something visual. Three ways of getting audio into the Web Audio graph — an `<audio>` element,
-a fully decoded buffer, and raw PCM streamed from the dev server — all feed the same tap, which
-feeds a WebGPU waveform.
+drive something visual. Four ways of getting audio into the Web Audio graph — an `<audio>` element,
+a fully decoded buffer, raw PCM streamed from the dev server, and a local file you drop in — all
+feed the same tap, which feeds a WebGPU waveform.
 
 The design has three independent layers, and this repo keeps them separate:
 
@@ -13,17 +13,17 @@ The design has three independent layers, and this repo keeps them separate:
 ingest (playback)  →  tap (read)  →  consume (WebGPU)
 ```
 
-- **Three entry points** — an `<audio>` element, a fully decoded `AudioBuffer`, and raw PCM streamed
-  from the dev server. Switch between them while audio plays.
+- **Four entry points** — an `<audio>` element, a fully decoded `AudioBuffer`, raw PCM streamed from
+  the dev server, and a local file you drop or pick. Switch between them while audio plays.
 - **Two read paths** — an `AnalyserNode` (easy, windowed) and an `AudioWorklet` (exact contiguous
   frames) publishing through a `SharedArrayBuffer` ring.
 - **One GPU consumer** — a 2048-sample frame → compute pass → fragment-shader waveform, with a
   Canvas2D fallback and a display-only auto-gain so quiet, bass-heavy audio still looks alive.
 
 The point is the seams: every entry point feeds the same gain node, so either tap works with all
-three, and swapping the consumer never touches the audio code.
+of them, and swapping the consumer never touches the audio code.
 
-![wave-gpu running: WebGPU waveform, stream entry point, SAB ring active](docs/demo.png)
+![wave-gpu running: WebGPU waveform, the local-file entry point active, SAB ring live](docs/demo.png)
 
 ## Run it
 
@@ -32,9 +32,10 @@ npm install
 npm run dev        # http://127.0.0.1:5173
 ```
 
-Click **Start**, then switch **entry point** and **read path** while it plays. The live readout
-shows both taps' RMS/peak, the context rate/latency, whether the shared ring is active, the GPU
-backend and the display gain.
+Click **Start**, then switch **entry point** and **read path** while it plays. Drop an audio file
+anywhere on the page (or use **Load file…**) to play your own track. The live readout shows the
+loaded file, both taps' RMS/peak, the context rate/latency, whether the shared ring is active, the
+GPU backend and the display gain.
 
 ```bash
 npm test           # node:test — pure logic: synth, WAV encoding, PCM chunking, display gain
@@ -53,6 +54,7 @@ process you need. The same plugin runs for `vite preview`.
 |---|---|
 | how playing and reading stay independent | [`src/types.ts`](src/types.ts) and [`src/main.ts`](src/main.ts) |
 | how audio gets into the graph | [`src/audio/sources/`](src/audio/sources/) |
+| how a dropped file becomes audio | [`src/audio/sources/file-source.ts`](src/audio/sources/file-source.ts) + [`src/ui/file-drop.ts`](src/ui/file-drop.ts) |
 | how the live stream is tapped | [`src/audio/taps/`](src/audio/taps/) and [`src/audio/worklet/capture-worklet.ts`](src/audio/worklet/capture-worklet.ts) |
 | how samples become pixels | [`src/gpu/webgpu.ts`](src/gpu/webgpu.ts) + [`src/gpu/shaders.ts`](src/gpu/shaders.ts) |
 | how the demo server works | [`server/`](server/) — deterministic synth, WAV encoder, stream endpoints |
@@ -69,6 +71,12 @@ Longer write-ups:
 - The track is **synthesized deterministically at server startup** (100 BPM, 12 s, Am–F–C–G–Em)
   and encoded to 16-bit PCM WAV by hand — no audio files in the repo, byte-identical on every run.
   The same float samples feed the raw PCM stream, so what you see is exactly what you hear.
+- **Local files are never parsed by this code.** A dropped/picked `File` becomes a same-origin
+  `blob:` URL and goes through the browser's normal `<audio>` pipeline, then
+  `MediaElementAudioSourceNode`. That is format-agnostic by design: MP3, AAC/M4A, Ogg/Opus, FLAC,
+  WAV… work if the browser decodes them. No `decodeAudioData`, no full-file allocation in JS, and
+  long files stream straight from disk. (The `decode` entry point deliberately shows the other
+  approach: whole file → `AudioBuffer` → PCM access.)
 - The worklet is TypeScript bundled by Vite via `?worker&url`:
   `import workletUrl from './worklet/capture-worklet.ts?worker&url'`. A plain `?url` import would
   inline raw TypeScript into a data: URL in production and fail to load as a worklet.
@@ -83,9 +91,11 @@ Longer write-ups:
 
 Verified in Chrome 157 in the host browser, over the dev server **and** the production build:
 `webgpu` backend active with no shader errors, 60 fps, `crossOriginIsolated` + a real
-`SharedArrayBuffer` ring, all three entry points audible/visible, both read paths showing live
-RMS/peak, zero console errors or exceptions. The host `AudioContext` came up at 44100 Hz while the
-source is 48 kHz — a nice live demonstration of the resampling path in `docs/browser-audio.md`.
+`SharedArrayBuffer` ring, all four entry points audible/visible, both read paths showing live
+RMS/peak, zero console errors or exceptions. Local-file playback was exercised through both the
+drop handler and the picker path with **WAV** (48 kHz) and **MP3** (44.1 kHz); unsupported files
+surface a clean error. The host `AudioContext` came up at 44100 Hz while the server track is
+48 kHz — a nice live demonstration of the resampling path in `docs/browser-audio.md`.
 `npm test` (34 tests) covers the pure logic: synth determinism, WAV encoding, PCM chunking, display
 gain. The browser/GPU pipeline is verified manually rather than unit-tested.
 

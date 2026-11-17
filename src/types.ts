@@ -10,7 +10,7 @@
  * samples came from.
  */
 
-export const ENTRY_POINT_IDS = ['element', 'decode', 'stream'] as const;
+export const ENTRY_POINT_IDS = ['element', 'decode', 'stream', 'file'] as const;
 export type EntryPointId = (typeof ENTRY_POINT_IDS)[number];
 
 export const TAP_IDS = ['worklet', 'analyser'] as const;
@@ -21,10 +21,17 @@ export interface SourceStats {
   chunks: number;
 }
 
+/** A local file the user dropped or picked; `durationSeconds` is 0 until known. */
+export interface FileInfo {
+  name: string;
+  size: number;
+  durationSeconds: number;
+}
+
 /**
  * One way of getting audio into the graph. Implementations own everything
- * below the destination node: element playback, buffer decoding, or fetching
- * and scheduling raw PCM chunks.
+ * below the destination node: element playback, buffer decoding, fetching and
+ * scheduling raw PCM chunks, or a user's local file behind a blob URL.
  */
 export interface AudioSource {
   readonly id: EntryPointId;
@@ -32,6 +39,8 @@ export interface AudioSource {
   readonly stats: SourceStats;
   start(context: AudioContext, destination: AudioNode): Promise<void>;
   stop(): void;
+  /** Optional cleanup for sources that hold external resources (blob URLs, tracks). */
+  dispose?(): void;
 }
 
 /**
@@ -84,8 +93,12 @@ export interface AudioEngine {
   /** True when the worklet tap is running on a SharedArrayBuffer ring. */
   readonly ring: boolean;
   readonly stats: SourceStats;
+  /** The file currently loaded into the `file` entry point, if any. */
+  readonly file: FileInfo | null;
   ensureContext(): Promise<AudioContext>;
   start(entry: EntryPointId): Promise<void>;
+  /** Load a local file (blob URL + `<audio>`) and switch the engine to it. */
+  loadFile(file: File): Promise<void>;
   setEntryPoint(entry: EntryPointId): Promise<void>;
   setTap(tap: TapId): void;
   pause(): Promise<void>;
@@ -99,6 +112,7 @@ export interface AudioEngine {
 /** Snapshot the UI needs to render the live readout. */
 export interface ReadoutState {
   entry: EntryPointId | null;
+  file: FileInfo | null;
   tap: TapId;
   playing: boolean;
   contextState: AudioContextState | 'none';

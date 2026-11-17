@@ -13,6 +13,7 @@ import { createAudioEngine } from './audio/engine.ts';
 import { createVisualizer } from './gpu/visualizer.ts';
 import { createControls } from './ui/controls.ts';
 import { createErrorStrip } from './ui/errors.ts';
+import { createFileDrop } from './ui/file-drop.ts';
 import { createReadout } from './ui/readout.ts';
 import { installDebugHook } from './debug.ts';
 import { createIdlePreview } from './idle-preview.ts';
@@ -46,11 +47,23 @@ stageNote?.remove();
 
 const engine: AudioEngine = createAudioEngine({ onError: (message) => errors.add(message) });
 
+const fileDrop = createFileDrop(document, {
+  onFile: (file) => {
+    void loadFile(file);
+  },
+  onError: (message) => errors.add(message),
+});
+
 const controls = createControls(document, {
   onTogglePlayback: () => {
     void togglePlayback();
   },
   onEntryPoint: (entry) => {
+    // The "file" button has no audio of its own until something is loaded.
+    if (entry === 'file' && engine.file === null) {
+      fileDrop.openPicker();
+      return;
+    }
     void selectEntryPoint(entry);
   },
   onTap: (tap) => {
@@ -103,6 +116,25 @@ async function selectEntryPoint(entry: EntryPointId): Promise<void> {
   }
 }
 
+/**
+ * A file arrived from the picker or a drop. The engine owns the actual loading
+ * (blob URL + browser decoder); here we just serialise the UI around it.
+ */
+async function loadFile(file: File): Promise<void> {
+  if (busy) return;
+  busy = true;
+  controls.setBusy(true);
+  try {
+    await engine.loadFile(file);
+    playing = engine.activeEntry !== null && !engine.paused;
+  } finally {
+    busy = false;
+    controls.setBusy(false);
+    controls.setPlaying(playing);
+    updateReadout();
+  }
+}
+
 function updateReadout(): void {
   forwardVisualizerErrors();
   const context = engine.context;
@@ -110,6 +142,7 @@ function updateReadout(): void {
   const analyser = engine.getTap('analyser');
   const state: ReadoutState = {
     entry: engine.activeEntry,
+    file: engine.file,
     tap: engine.activeTap,
     playing,
     contextState: context?.state ?? 'none',

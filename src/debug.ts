@@ -4,11 +4,12 @@
  * snapshot of the context, both taps, the stream and the GPU backend.
  */
 
-import type { AudioEngine, EntryPointId, TapId, Visualizer } from './types.ts';
+import type { AudioEngine, EntryPointId, FileInfo, TapId, Visualizer } from './types.ts';
 
 export interface ProbeSnapshot {
   ready: boolean;
   entry: EntryPointId | null;
+  file: FileInfo | null;
   tap: TapId;
   playing: boolean;
   context: {
@@ -62,6 +63,7 @@ export function installDebugHook(deps: DebugDeps): void {
     return {
       ready: true,
       entry: engine.activeEntry,
+      file: engine.file,
       tap: engine.activeTap,
       playing: deps.isPlaying(),
       context: {

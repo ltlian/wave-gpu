@@ -8,7 +8,7 @@
  */
 
 import { TAP_CAPACITY } from '../../shared/audio.ts';
-import type { ReadoutState } from '../types.ts';
+import type { FileInfo, ReadoutState } from '../types.ts';
 
 const NO_VALUE = '—';
 
@@ -19,6 +19,19 @@ export interface Readout {
 /** AudioContext latencies are in seconds; the panel speaks milliseconds. */
 function formatLatency(seconds: number | null): string {
   return seconds === null || !Number.isFinite(seconds) ? NO_VALUE : `${(seconds * 1000).toFixed(2)} ms`;
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  const total = Math.round(seconds);
+  const minutes = Math.floor(total / 60);
+  return `${minutes}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function formatFile(file: FileInfo | null): string {
+  if (file === null) return NO_VALUE;
+  const duration = formatDuration(file.durationSeconds);
+  return duration.length > 0 ? `${file.name} · ${duration}` : file.name;
 }
 
 function formatLevel(rms: number, peak: number): string {
@@ -63,6 +76,7 @@ export function createReadout(root: ParentNode): Readout {
     const contextLabel = contextIdle ? 'idle' : state.contextState;
 
     setField('entry', state.entry ?? NO_VALUE);
+    setField('file', formatFile(state.file));
     setField('tap', state.tap);
     setField('context-state', contextIdle ? 'not created' : state.contextState);
     setField('sample-rate', state.sampleRate > 0 ? `${state.sampleRate} Hz` : NO_VALUE);

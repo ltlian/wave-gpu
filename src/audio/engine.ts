@@ -19,12 +19,14 @@
  * the public API — the page (and the visualization) must stay alive.
  */
 
-import type { AudioEngine, AudioSource, EntryPointId, SampleTap, SourceStats, TapId } from '../types.ts';
+import type { AudioEngine, AudioSource, EntryPointId, FileInfo, SampleTap, SourceStats, TapId } from '../types.ts';
 import { createDecodedBufferSource } from './sources/decoded-buffer-source.ts';
 import { createElementSource } from './sources/element-source.ts';
+import { createFileSource } from './sources/file-source.ts';
 import { createStreamSource } from './sources/stream-source.ts';
 import { createAnalyserTap } from './taps/analyser-tap.ts';
 import { createWorkletTap } from './taps/worklet-tap.ts';
+import type { FileSource } from './sources/file-source.ts';
 import type { WorkletTap } from './taps/worklet-tap.ts';
 
 /** Master gain: the synth loop is rendered close to full scale. */
@@ -52,6 +54,8 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
   let masterGain: GainNode | null = null;
   let analyserTap: SampleTap | null = null;
   let workletTap: WorkletTap | null = null;
+  let fileSource: FileSource | null = null;
+  let fileInfo: FileInfo | null = null;
 
   const sources = new Map<EntryPointId, AudioSource>();
   let activeEntry: EntryPointId | null = null;
@@ -60,13 +64,22 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
   /** Serialises source switches; see `enqueue()`. */
   let switchChain: Promise<void> = Promise.resolve();
 
+  function getFileSource(): FileSource {
+    if (fileSource === null) {
+      fileSource = createFileSource(onError);
+      sources.set('file', fileSource);
+    }
+    return fileSource;
+  }
+
   function getSource(entry: EntryPointId): AudioSource {
     const existing = sources.get(entry);
     if (existing !== undefined) return existing;
     let source: AudioSource;
     if (entry === 'element') source = createElementSource(onError);
     else if (entry === 'decode') source = createDecodedBufferSource(onError);
-    else source = createStreamSource(onError);
+    else if (entry === 'stream') source = createStreamSource(onError);
+    else source = getFileSource();
     sources.set(entry, source);
     return source;
   }
@@ -199,6 +212,62 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
     await enqueue(() => startEntry(entry));
   }
 
+  /**
+   * Load a local file and make it the active source.
+   *
+   * The whole swap runs inside `enqueue()` so two fast drops cannot interleave:
+   * stop whatever is playing, decode the file's metadata, then start the file
+   * source. The browser does the actual decoding (see `file-source.ts`).
+   */
+  function loadFile(file: File): Promise<void> {
+    if (disposed) return Promise.resolve();
+    return enqueue(async () => {
+      if (disposed) return;
+      let ctx: AudioContext;
+      try {
+        ctx = await ensureContext();
+      } catch (error) {
+        onError(`audio context could not be created: ${describeError(error)}`);
+        return;
+      }
+      if (ctx.state !== 'running') {
+        try {
+          await ctx.resume();
+        } catch (error) {
+          onError(`AudioContext.resume() was blocked (${describeError(error)}) — press Start again after interacting with the page`);
+        }
+      }
+      if (disposed) return;
+
+      stopActiveSource();
+      const source = getFileSource();
+      try {
+        fileInfo = await source.load(file);
+      } catch (error) {
+        fileInfo = null;
+        onError(`could not load "${file.name}": ${describeError(error)}`);
+        return;
+      }
+      const gain = masterGain;
+      if (gain === null) return;
+      try {
+        await source.start(ctx, gain);
+        if (disposed) {
+          source.stop();
+          return;
+        }
+        activeEntry = 'file';
+      } catch (error) {
+        try {
+          source.stop();
+        } catch {
+          // nothing to clean up
+        }
+        onError(describeError(error));
+      }
+    });
+  }
+
   async function pause(): Promise<void> {
     const ctx = context;
     if (ctx === null) return;
@@ -276,8 +345,15 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
       } catch {
         // already stopped
       }
+      try {
+        source.dispose?.();
+      } catch {
+        // best-effort cleanup of external resources
+      }
     }
     sources.clear();
+    fileSource = null;
+    fileInfo = null;
     analyserTap?.dispose();
     workletTap?.dispose();
     analyserTap = null;
@@ -315,8 +391,12 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
       if (activeEntry === null) return ZERO_STATS;
       return sources.get(activeEntry)?.stats ?? ZERO_STATS;
     },
+    get file() {
+      return fileInfo;
+    },
     ensureContext,
     start,
+    loadFile,
     setEntryPoint,
     setTap,
     pause,

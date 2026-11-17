@@ -20,8 +20,8 @@
         <div>
           <h1>Play audio. Read the samples. Draw them.</h1>
           <p class="subtitle">
-            One track, three entry points, two read paths, one WebGPU visualizer — switch any of
-            them and watch the same samples flow through.
+            Four entry points, two read paths, one WebGPU visualizer — switch any of them, or drop
+            in an audio file of your own.
           </p>
         </div>
         <div class="badges" aria-live="polite">
@@ -38,12 +38,21 @@
 
       <section class="controls" aria-label="Playback controls">
         <button id="start" class="button primary" type="button">Start</button>
+        <button id="load-file" class="button" type="button">Load file…</button>
+        <input
+          id="file-input"
+          class="visually-hidden"
+          type="file"
+          accept="audio/*"
+          aria-label="Audio file"
+        />
 
         <div class="group" role="group" aria-label="Entry point">
           <span class="group-label">entry point</span>
           <button class="choice" type="button" data-entry="element">element</button>
           <button class="choice" type="button" data-entry="decode">decode</button>
           <button class="choice" type="button" data-entry="stream">stream</button>
+          <button class="choice" type="button" data-entry="file">file</button>
         </div>
 
         <div class="group" role="group" aria-label="Read path">
@@ -57,6 +66,7 @@
         <h2 class="panel-title">live readout</h2>
         <dl class="readout" id="readout">
           <div><dt>entry</dt><dd data-field="entry">—</dd></div>
+          <div><dt>file</dt><dd data-field="file">—</dd></div>
           <div><dt>read path</dt><dd data-field="tap">—</dd></div>
           <div><dt>context</dt><dd data-field="context-state">—</dd></div>
           <div><dt>sample rate</dt><dd data-field="sample-rate">—</dd></div>

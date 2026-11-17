@@ -17,6 +17,7 @@ samples came from an `<audio>` element, a decoded buffer, or a network stream.
  entry point        │  sources/element-source.ts   <audio> + MediaElementAudioSourceNode │
  (ingest)           │  sources/decoded-buffer-source.ts  fetch + decodeAudioData → loop  │
                     │  sources/stream-source.ts    fetch raw f32le + schedule buffers   │
+                    │  sources/file-source.ts      dropped file → blob: URL → <audio>   │
                     └───────────────────────────────┬──────────────────────────────────┘
                                                     │ source → masterGain (0.35)
                                                     ▼
@@ -48,7 +49,7 @@ visualizer, wires the UI, runs a `requestAnimationFrame` loop, and assembles the
 1. **Nothing is created until a user gesture.** `main.ts` calls `engine.start(entry)` from the
    Start button. `ensureContext()` creates the `AudioContext` (interactive latency hint), the
    master gain, both taps, and resumes the context.
-2. **The engine starts one source.** `element`, `decode` or `stream` — each owns its own
+2. **The engine starts one source.** `element`, `decode`, `stream` or `file` — each owns its own
    resources. Sources connect to `masterGain`; switching stops the previous source first.
 3. **Both taps sit on `masterGain`, always.** The analyser branch is passive. The worklet tap
    reads through a silent `GainNode(0)` → `destination` so the graph keeps pulling it.
@@ -85,6 +86,17 @@ does not trust fetch chunk boundaries — it keeps leftover bytes and only decod
 stereo frames. Playback is scheduled as small `AudioBuffer`s (created with `sampleRate: 48000`)
 against `ctx.currentTime`, with a ~0.25 s prebuffer and ~0.2 s lookahead. If the playhead overtakes
 the queue, the scheduler jumps forward instead of stacking up old buffers.
+
+### Local files (`file-source.ts`)
+
+A dropped or picked file is wrapped in a same-origin `blob:` URL and fed to the same
+`<audio>` → `MediaElementAudioSourceNode` path as the `element` entry point. The browser's media
+stack does the demuxing and decoding, so **no format-specific code exists here** and MP3, AAC/M4A,
+Ogg/Opus, FLAC and WAV all take the identical route. The source waits for `loadedmetadata` to learn
+the duration (shown in the readout), reuses one element across loads, and revokes the previous
+object URL when it is replaced. Long files stream from disk; nothing is decoded into JS memory.
+The drop/picker wiring (document-level `dragenter`/`dragover`/`drop`, a hidden file input, and the
+drag-over stage state) lives in `src/ui/file-drop.ts`.
 
 ### The producer (`server/`)
 
@@ -128,7 +140,7 @@ the production build — audio worklets cannot load that.)
 | `src/main.ts` | wiring, rAF loop, readout assembly, idle preview fallback |
 | `src/types.ts` | the layer contracts |
 | `src/audio/engine.ts` | AudioContext, master gain, source switching, pause/resume |
-| `src/audio/sources/*.ts` | the three entry points |
+| `src/audio/sources/*.ts` | the four entry points (element, decode, stream, file) |
 | `src/audio/taps/*.ts` | `AnalyserNode` tap and `AudioWorklet` tap |
 | `src/audio/worklet/capture-worklet.ts` | audio-thread processor, SAB ring, stats |
 | `src/audio/pcm.ts` | pure interleaved-f32 chunk helpers (unit-tested) |
@@ -136,7 +148,7 @@ the production build — audio worklets cannot load that.)
 | `src/gpu/webgpu.ts`, `shaders.ts` | compute + render pipeline, WGSL |
 | `src/gpu/canvas2d.ts` | fallback renderer |
 | `src/gpu/display-gain.ts` | pure rolling-peak normalisation (unit-tested) |
-| `src/ui/*.ts` | controls, readout, error strip (DOM only) |
+| `src/ui/*.ts` | controls, readout, error strip, file drop/picker (DOM only) |
 | `server/audio-plugin.ts` | Vite middleware + audio endpoints |
 | `server/synth.ts`, `wav.ts`, `assets.ts` | deterministic track, WAV encoder, cached assets |
 | `shared/audio.ts` | constants shared by browser and server |
