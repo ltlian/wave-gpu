@@ -11,7 +11,11 @@
  *
  * No GPU is available in the build/test container, so this file is written
  * defensively: every WebGPU call that can throw is caught and turned into a
- * human-readable message instead of an unhandled rejection.
+ * human-readable message instead of an unhandled rejection. Initialisation is
+ * also time-bounded: a browser whose GPU process stalls on `requestAdapter()`
+ * (instead of resolving or rejecting) would otherwise leave the page waiting
+ * forever on a black canvas, so `awaitWithin()` reports the stall and the
+ * Canvas2D fallback takes over.
  */
 
 import { FRAME_SAMPLES } from '../../shared/audio.ts';
@@ -25,6 +29,13 @@ const COMPUTE_WORKGROUP_SIZE = 8;
 /** Two vec4<f32>: params0 (time, level, crest, aspect) and params1 (columns, ampScale, -, -). */
 const UNIFORM_BYTES = 32;
 const MAX_FRAME_ERRORS = 3;
+/**
+ * How long one awaited GPU call may take during initialisation before the
+ * browser is treated as unable to provide WebGPU. A wedged GPU process can
+ * leave `requestAdapter()`/`requestDevice()` pending forever, and the page has
+ * nothing to draw until they settle.
+ */
+const GPU_INIT_TIMEOUT_MS = 5000;
 
 /**
  * lib.dom in TypeScript 7 ships the WebGPU interfaces but not the usage-flag
@@ -47,9 +58,38 @@ function describeError(error: unknown): string {
   return String(error);
 }
 
+/**
+ * Resolve to `undefined` (after reporting why) if `work` has not settled within
+ * the init deadline. Used for every awaited browser call in initialisation, so
+ * a stalled GPU stack can never leave the app hanging with no error.
+ */
+function awaitWithin<T>(
+  work: Promise<T>,
+  label: string,
+  report: (message: string) => void,
+): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => {
+      report(
+        `WebGPU ${label} did not respond within ${GPU_INIT_TIMEOUT_MS / 1000} s — the Canvas2D fallback will be used.`,
+      );
+      resolve(undefined);
+    }, GPU_INIT_TIMEOUT_MS);
+  });
+  return Promise.race([work, deadline]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 async function requestAdapter(gpu: GPU, report: (message: string) => void): Promise<GPUAdapter | null> {
   try {
-    const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
+    const adapter = await awaitWithin(
+      gpu.requestAdapter({ powerPreference: 'high-performance' }),
+      'requestAdapter()',
+      report,
+    );
+    if (adapter === undefined) return null;
     if (!adapter) {
       report('No compatible WebGPU adapter was found — the Canvas2D fallback will be used.');
       return null;
@@ -63,7 +103,8 @@ async function requestAdapter(gpu: GPU, report: (message: string) => void): Prom
 
 async function requestDevice(adapter: GPUAdapter, report: (message: string) => void): Promise<GPUDevice | null> {
   try {
-    return await adapter.requestDevice();
+    const device = await awaitWithin(adapter.requestDevice(), 'requestDevice()', report);
+    return device ?? null;
   } catch (error) {
     report(`WebGPU requestDevice() failed: ${describeError(error)} — the Canvas2D fallback will be used.`);
     return null;
@@ -89,7 +130,12 @@ async function withValidationScope<T>(
   } catch (error) {
     failure = `WebGPU ${label} failed: ${describeError(error)}`;
   }
-  const scopeError = await device.popErrorScope().catch(() => null);
+  const scopeError = await awaitWithin(
+    device.popErrorScope().catch(() => null),
+    'validation error check',
+    report,
+  );
+  if (scopeError === undefined) return null;
   if (scopeError) {
     report(`WebGPU ${label} validation failed: ${scopeError.message}`);
     return null;
@@ -135,7 +181,8 @@ async function createShaderModules(
   ];
   for (const [name, module] of named) {
     try {
-      const info = await module.getCompilationInfo();
+      const info = await awaitWithin(module.getCompilationInfo(), `getCompilationInfo(${name})`, report);
+      if (info === undefined) return null;
       for (const message of info.messages) {
         if (message.type === 'error') {
           const line = message.lineNum > 0 ? ` (line ${message.lineNum})` : '';

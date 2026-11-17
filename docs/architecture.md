@@ -138,6 +138,15 @@ Raw sample values, the RMS/peak readout and `window.__wave.probe()` are never af
 gain is surfaced in the readout. Idle preview frames (before first playback) use a fixed pleasing
 level instead.
 
+### WebGPU initialisation is time-bounded
+
+`webgpu.ts` reports every failure and returns `null`, which is what lets `visualizer.ts` swap in the
+Canvas2D backend. One failure mode needs extra care: a browser whose GPU stack is wedged can leave
+`requestAdapter()`/`requestDevice()` pending forever instead of resolving or rejecting, and the
+page then waits on a black canvas with no error. Each awaited initialisation call is therefore
+wrapped in `awaitWithin()` (5 s): on timeout it reports why and the Canvas2D fallback takes over.
+The error strip is mirrored to the console (`ui/errors.ts`), so the reason is visible in DevTools.
+
 ### AudioWorklet in a Vite build
 
 The worklet is TypeScript, loaded with:

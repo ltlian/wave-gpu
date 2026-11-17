@@ -3,7 +3,9 @@
  *
  * Everything that goes wrong in the app funnels here (audio failures, WebGPU
  * diagnostics, window errors wired up in `main.ts`). The panel stays hidden
- * while there is nothing to show and appears on the first message.
+ * while there is nothing to show and appears on the first message. Each
+ * message is also printed to the browser console, so a broken page leaves a
+ * trail in DevTools for anyone who cannot see (or does not scroll to) the panel.
  */
 
 /** How many messages the panel keeps; older ones fall off the top. */
@@ -32,6 +34,10 @@ export function createErrorStrip(root: ParentNode): ErrorStrip {
 
     messages.push(text);
     while (messages.length > MAX_MESSAGES) messages.shift();
+
+    // Mirror the strip in the console: a user reporting "black screen" should
+    // have the actual reason available in DevTools.
+    console.error(`[wave-gpu] ${text}`);
 
     if (listElement) {
       const item = document.createElement('li');
