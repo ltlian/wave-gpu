@@ -63,6 +63,10 @@ Worker script, no Pages project): <https://wave.ltlian.com>.
 npm run deploy     # runs `wrangler deploy`, which builds first (see wrangler.jsonc)
 ```
 
+Pushing to `main` deploys automatically: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
+runs the tests and then `wrangler deploy`, using the `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` repository secrets.
+
 Two details make a static host enough:
 
 - [`scripts/build-audio.ts`](scripts/build-audio.ts) runs after `vite build` and renders the stream
