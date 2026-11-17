@@ -1,0 +1,19 @@
+{
+  "name": "wave-gpu",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Worked example: play audio in the browser and read the same samples to drive a WebGPU waveform.",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}

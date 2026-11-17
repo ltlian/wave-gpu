@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070a12'/%3E%3Cpath d='M4 16c4 0 4-9 8-9s4 18 8 18 4-9 8-9' fill='none' stroke='%237c4dff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <title>wave-gpu — play audio, read samples, draw them</title>
+    <meta
+      name="description"
+      content="Worked example: play browser audio and read the same samples to drive a WebGPU waveform."
+    />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div>
+          <h1>Play audio. Read the samples. Draw them.</h1>
+          <p class="subtitle">
+            One track, three entry points, two read paths, one WebGPU visualizer — switch any of
+            them and watch the same samples flow through.
+          </p>
+        </div>
+        <div class="badges" aria-live="polite">
+          <span class="badge" data-badge="context">context: idle</span>
+          <span class="badge" data-badge="gpu">gpu: starting…</span>
+          <span class="badge" data-badge="ring">ring: —</span>
+        </div>
+      </header>
+
+      <section class="stage" aria-label="WebGPU waveform">
+        <canvas id="stage"></canvas>
+        <p class="stage-note" id="stage-note">press start to hear the synth loop</p>
+      </section>
+
+      <section class="controls" aria-label="Playback controls">
+        <button id="start" class="button primary" type="button">Start</button>
+
+        <div class="group" role="group" aria-label="Entry point">
+          <span class="group-label">entry point</span>
+          <button class="choice" type="button" data-entry="element">element</button>
+          <button class="choice" type="button" data-entry="decode">decode</button>
+          <button class="choice" type="button" data-entry="stream">stream</button>
+        </div>
+
+        <div class="group" role="group" aria-label="Read path">
+          <span class="group-label">read path</span>
+          <button class="choice" type="button" data-tap="worklet">worklet</button>
+          <button class="choice" type="button" data-tap="analyser">analyser</button>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="Live readout">
+        <h2 class="panel-title">live readout</h2>
+        <dl class="readout" id="readout">
+          <div><dt>entry</dt><dd data-field="entry">—</dd></div>
+          <div><dt>read path</dt><dd data-field="tap">—</dd></div>
+          <div><dt>context</dt><dd data-field="context-state">—</dd></div>
+          <div><dt>sample rate</dt><dd data-field="sample-rate">—</dd></div>
+          <div><dt>base latency</dt><dd data-field="base-latency">—</dd></div>
+          <div><dt>output latency</dt><dd data-field="output-latency">—</dd></div>
+          <div><dt>cross-origin isolated</dt><dd data-field="coi">—</dd></div>
+          <div><dt>shared ring (SAB)</dt><dd data-field="sab">—</dd></div>
+          <div><dt>worklet blocks</dt><dd data-field="worklet-blocks">—</dd></div>
+          <div><dt>worklet rms / peak</dt><dd data-field="worklet-level">—</dd></div>
+          <div><dt>analyser rms / peak</dt><dd data-field="analyser-level">—</dd></div>
+          <div><dt>stream bytes</dt><dd data-field="stream-stats">—</dd></div>
+          <div><dt>gpu</dt><dd data-field="gpu">—</dd></div>
+          <div><dt>display gain</dt><dd data-field="display-gain">—</dd></div>
+          <div><dt>fps</dt><dd data-field="fps">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="errors-panel" aria-label="Errors">
+        <h2 class="panel-title">errors</h2>
+        <ul id="errors" class="errors" aria-live="polite">
+          <li class="errors-empty">none</li>
+        </ul>
+      </section>
+
+      <footer class="footer">
+        <p>
+          A worked example, not a product — see
+          <code>docs/architecture.md</code> and <code>docs/browser-audio.md</code>.
+        </p>
+      </footer>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
