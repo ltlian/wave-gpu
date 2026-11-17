@@ -87,6 +87,14 @@ stereo frames. Playback is scheduled as small `AudioBuffer`s (created with `samp
 against `ctx.currentTime`, with a ~0.25 s prebuffer and ~0.2 s lookahead. If the playhead overtakes
 the queue, the scheduler jumps forward instead of stacking up old buffers.
 
+The producer is allowed to be either real-time paced (the dev server writes one 20 ms chunk per
+20 ms) or much faster (the deployed site serves the loop as a static file), so the source paces its
+own *reads*: it pulls bytes only while fewer than ~2 s are queued and lets the scheduler drain the
+queue before pulling more. A single `read()` can return far more than that — the browser buffers a
+static file while the read loop waits — and the overshoot is kept rather than dropped. When the
+body ends the source re-fetches it, which is seamless because a couple of seconds of audio are
+still queued.
+
 ### Local files (`file-source.ts`)
 
 A dropped or picked file is wrapped in a same-origin `blob:` URL and fed to the same
@@ -104,6 +112,11 @@ The dev server is a small Vite plugin, not a second process. It synthesizes a de
 loop (100 BPM, Am–F–C–G–Em) at startup, encodes it as 16-bit PCM WAV for `/audio/track.wav`, and
 interleaves the same floats for `/stream/pcm`. It also sets the isolation headers. Everything is
 rendered once per process and cached.
+
+A deployed site has no process, so `scripts/build-audio.ts` renders the same loop at build time and
+writes the three responses into `dist/` as files (`audio/track.wav`, `stream/pcm`, `api/meta`);
+`public/_headers` supplies the isolation headers that the plugin sets in dev. The result is a
+purely static deployment — see the Deploy section of the README.
 
 ### Display gain is presentation only
 

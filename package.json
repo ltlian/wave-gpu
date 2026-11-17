@@ -7,14 +7,18 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && vite build",
+    "build": "npm run typecheck && vite build && npm run build:audio",
+    "build:audio": "node scripts/build-audio.ts",
     "preview": "vite preview",
+    "preview:worker": "wrangler dev",
+    "deploy": "wrangler deploy",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "test": "node --test"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.8"
+    "vite": "^8.3.8",
+    "wrangler": "^4.164.0"
   }
 }

@@ -4,8 +4,8 @@
 
 A small, dependency-light project: play audio in the browser while also getting at the stream, to
 drive something visual. Four ways of getting audio into the Web Audio graph — an `<audio>` element,
-a fully decoded buffer, raw PCM streamed from the dev server, and a local file you drop in — all
-feed the same tap, which feeds a WebGPU waveform.
+a fully decoded buffer, raw PCM streamed from a server (a Vite plugin in dev, a static file when
+deployed), and a local file you drop in — all feed the same tap, which feeds a WebGPU waveform.
 
 The design has three independent layers, and this repo keeps them separate:
 
@@ -14,7 +14,7 @@ ingest (playback)  →  tap (read)  →  consume (WebGPU)
 ```
 
 - **Four entry points** — an `<audio>` element, a fully decoded `AudioBuffer`, raw PCM streamed from
-  the dev server, and a local file you drop or pick. Switch between them while audio plays.
+  a server, and a local file you drop or pick. Switch between them while audio plays.
 - **Two read paths** — an `AnalyserNode` (easy, windowed) and an `AudioWorklet` (exact contiguous
   frames) publishing through a `SharedArrayBuffer` ring.
 - **One GPU consumer** — a 2048-sample frame → compute pass → fragment-shader waveform, with a
@@ -48,6 +48,28 @@ The audio endpoints (`/api/meta`, `/audio/track.wav`, `/stream/pcm`) are served 
 plugin in [`server/audio-plugin.ts`](server/audio-plugin.ts), so the dev server is the only
 process you need. The same plugin runs for `vite preview`.
 
+## Deploy
+
+The built site is plain static files, deployed as a Cloudflare Worker with static assets (no
+Worker script, no Pages project): <https://wave.ltlian.com>.
+
+```bash
+npm run deploy     # runs `wrangler deploy`, which builds first (see wrangler.jsonc)
+```
+
+Two details make a static host enough:
+
+- [`scripts/build-audio.ts`](scripts/build-audio.ts) runs after `vite build` and renders the loop
+  once into `dist/`: `audio/track.wav`, `stream/pcm` (the interleaved f32le samples) and
+  `api/meta`. The synth and WAV encoder are shared with the dev server.
+- [`public/_headers`](public/_headers) sets the COOP/COEP/CORP isolation headers on every asset,
+  which is what gives the deployed page a real `SharedArrayBuffer` ring.
+
+Because `/stream/pcm` is a finite file in production, the client paces its own reads and re-fetches
+when the body ends ([`src/audio/sources/stream-source.ts`](src/audio/sources/stream-source.ts)) —
+the same code path that consumes the dev server's real-time paced stream. That also keeps the
+deployment free of any per-request compute: every request is served by Cloudflare's asset layer.
+
 ## What to look at first
 
 | If you want to understand… | Read |
@@ -80,8 +102,9 @@ Longer write-ups:
 - The worklet is TypeScript bundled by Vite via `?worker&url`:
   `import workletUrl from './worklet/capture-worklet.ts?worker&url'`. A plain `?url` import would
   inline raw TypeScript into a data: URL in production and fail to load as a worklet.
-- Cross-origin isolation (`COOP: same-origin` + `COEP: require-corp`) is set by the plugin so the
-  page gets a real `SharedArrayBuffer`; without it the worklet falls back to `postMessage`.
+- Cross-origin isolation (`COOP: same-origin` + `COEP: require-corp`) is set by the plugin in dev
+  and by [`public/_headers`](public/_headers) when deployed, so the page gets a real
+  `SharedArrayBuffer`; without it the worklet falls back to `postMessage`.
 - The page has a small read-only probe for debugging and automation:
   `window.__wave.probe()` returns context, both taps, stream and GPU state. `window.__wave.start('stream')`
   etc. drive it programmatically (after a real user gesture has unlocked audio, or in a headless
@@ -96,6 +119,10 @@ RMS/peak, zero console errors or exceptions. Local-file playback was exercised t
 drop handler and the picker path with **WAV** (48 kHz) and **MP3** (44.1 kHz); unsupported files
 surface a clean error. The host `AudioContext` came up at 44100 Hz while the server track is
 48 kHz — a nice live demonstration of the resampling path in `docs/browser-audio.md`.
+The deployed site was verified the same way: `wave.ltlian.com` served with `crossOriginIsolated`
+and a live SAB ring, `webgpu` backend, 60 fps, and the `stream` entry point looping across the
+12 s file boundary with no console errors.
+
 `npm test` (34 tests) covers the pure logic: synth determinism, WAV encoding, PCM chunking, display
 gain. The browser/GPU pipeline is verified manually rather than unit-tested.
 

@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wave-gpu",
+  "compatibility_date": "2026-07-06",
+  // Static-only: the Worker exists to host `dist/` (and nothing else). Isolation
+  // headers live in public/_headers, the audio endpoints are build-generated files.
+  // Keeping the site script-free means requests are served by the asset layer —
+  // unmetered and without CPU limits, which is what makes the looping PCM stream
+  // viable on the free plan.
+  "assets": {
+    "directory": "dist"
+  },
+  // `wrangler deploy` (and `wrangler dev`) build first, so dist/ is never stale.
+  "build": {
+    "command": "npm run build"
+  },
+  "routes": [
+    {
+      "pattern": "wave.ltlian.com",
+      "custom_domain": true
+    }
+  ]
+}

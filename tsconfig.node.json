@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["server", "shared", "vite.config.ts", "src/**/*.test.ts"]
+  "include": ["server", "shared", "scripts", "vite.config.ts", "src/**/*.test.ts"]
 }

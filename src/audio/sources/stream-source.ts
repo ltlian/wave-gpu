@@ -1,13 +1,20 @@
 /**
  * Entry point #3: a live raw-PCM stream.
  *
- * `GET /stream/pcm` emits interleaved stereo f32le @ 48 kHz forever, paced at
- * one 20 ms chunk per 20 ms. There is no decoder: the bytes *are* the samples,
- * so this mode owns the clock end to end:
+ * `GET /stream/pcm` is interleaved stereo f32le @ 48 kHz. There is no decoder:
+ * the bytes *are* the samples, so this mode owns the clock end to end.
  *
  *   fetch() bytes ─▶ pcm.appendBytes (whole frames only)
  *                 ─▶ pending queue ─▶ small AudioBuffers scheduled against
  *                                    ctx.currentTime with ~0.2 s lookahead
+ *
+ * The endpoint can be real-time paced (the dev server writes one 20 ms chunk per
+ * 20 ms) or a plain finite file (the deployed site ships the loop as a static
+ * asset). Both behave the same here because the client paces its own *reads*:
+ * it keeps ~2 s of audio queued and only reads more once the scheduler has
+ * drained below that, so bytes that arrive faster than playback cannot outrun
+ * the queue. When the body ends it is re-fetched; the queue still holds ~2 s, so
+ * the loop restarts without a gap.
  *
  * Two details make it robust:
  *  - network chunks are arbitrary sizes, so the byte tail that does not yet
@@ -34,11 +41,22 @@ const LOOKAHEAD_SECONDS = 0.2;
 const SCHEDULE_CHUNK_FRAMES = 3_840;
 /** Do not schedule fragments smaller than one server chunk (20 ms). */
 const MIN_SCHEDULE_FRAMES = STREAM_CHUNK_FRAMES;
-/** Cap the queue at ~2 s so a stalled consumer cannot grow it forever. */
+/**
+ * Read-ahead target: below this the read loop pulls more bytes, above it waits
+ * for the scheduler to drain. A single `read()` can return a chunk far larger
+ * than the target (the browser buffers a static file while we wait), so the
+ * queue is allowed to overshoot instead of being trimmed.
+ */
 const MAX_PENDING_FRAMES = SAMPLE_RATE * 2;
+/**
+ * Hard cap, only for a pathological stall (suspended context, throttled tab).
+ * Larger than the 12 s loop on purpose: bytes that arrived are kept, because
+ * dropping them is exactly the audio gap this pacing exists to avoid.
+ */
+const HARD_CAP_FRAMES = SAMPLE_RATE * 15;
 /** Start with whatever arrived if the stream is slower than we hoped. */
 const START_TIMEOUT_MS = 1_500;
-/** Top-up cadence; matching the server's pacing keeps latency predictable. */
+/** Top-up cadence, and how long a paused read waits before re-checking the queue. */
 const PUMP_INTERVAL_MS = STREAM_INTERVAL_MS;
 
 function describeError(error: unknown): string {
@@ -54,6 +72,9 @@ function isAbortError(error: unknown): boolean {
     (error as { name: unknown }).name === 'AbortError'
   );
 }
+
+const sleep = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 interface StreamState {
   readonly context: AudioContext;
@@ -166,8 +187,13 @@ export function createStreamSource(onError: (message: string) => void = () => {}
     }
   }
 
+  /**
+   * Safety valve for a stalled pump: past the hard cap the oldest audio is
+   * dropped rather than grown without bound. Steady state never reaches it —
+   * the read loop pauses at MAX_PENDING_FRAMES instead.
+   */
   function dropOldest(stream: StreamState): void {
-    while (stream.pendingFrames > MAX_PENDING_FRAMES && stream.pending.length > 0) {
+    while (stream.pendingFrames > HARD_CAP_FRAMES && stream.pending.length > 0) {
       const head = stream.pending.shift();
       if (head === undefined) break;
       stream.pendingFrames -= head.length / STREAM_CHANNELS;
@@ -184,27 +210,67 @@ export function createStreamSource(onError: (message: string) => void = () => {}
     stream.resolveStarted = null;
   }
 
+  /** Open the endpoint and hand its body to the read loop. */
+  async function connect(stream: StreamState): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(STREAM_URL, { signal: stream.abort.signal, cache: 'no-store' });
+    } catch (error) {
+      if (stream.stopped || isAbortError(error)) throw error;
+      throw new Error(`could not open ${STREAM_URL}: ${describeError(error)}`);
+    }
+    if (stream.stopped) return;
+    if (!response.ok) throw new Error(`${STREAM_URL} responded HTTP ${response.status}`);
+    const body = response.body;
+    if (body === null) throw new Error(`${STREAM_URL} has no readable body`);
+    stream.reader = body.getReader();
+  }
+
+  /**
+   * Re-open the endpoint after its body ended (a finite static asset in
+   * production, or a connection that dropped). The queue still holds ~2 s, so
+   * this is seamless; `false` means the source is dead and has been released.
+   */
+  async function reconnect(stream: StreamState): Promise<boolean> {
+    stream.reader = null;
+    try {
+      await connect(stream);
+      return !stream.stopped;
+    } catch (error) {
+      if (stream.stopped || isAbortError(error)) return false;
+      onError(describeError(error));
+      if (state === stream) state = null;
+      release(stream);
+      return false;
+    }
+  }
+
   async function readLoop(stream: StreamState): Promise<void> {
     while (!stream.stopped) {
+      const reader = stream.reader;
+      if (reader === null) return;
+
+      // Pace reads against playback. A static file can deliver the whole loop
+      // in milliseconds, but the scheduler only looks 0.2 s ahead, so only read
+      // while there is room in the queue. A server that paces its writes never
+      // makes this wait — the bytes arrive just in time by themselves.
+      if (stream.pendingFrames >= MAX_PENDING_FRAMES) {
+        await sleep(PUMP_INTERVAL_MS);
+        continue;
+      }
+
       let result: ReadableStreamReadResult<Uint8Array>;
       try {
-        const reader = stream.reader;
-        if (reader === null) return;
         result = await reader.read();
       } catch (error) {
         if (stream.stopped || isAbortError(error)) return;
-        const message = `stream read failed: ${describeError(error)}`;
-        onError(message);
-        if (state === stream) state = null;
-        release(stream);
-        return;
+        if (!(await reconnect(stream))) return;
+        continue;
       }
       if (stream.stopped) return;
       if (result.done) {
-        onError('the PCM stream ended unexpectedly');
-        if (state === stream) state = null;
-        release(stream);
-        return;
+        if (!(await reconnect(stream))) return;
+        continue;
       }
 
       const value = result.value;
@@ -256,13 +322,12 @@ export function createStreamSource(onError: (message: string) => void = () => {}
       };
       state = stream;
 
-      let response: Response;
       try {
-        response = await fetch(STREAM_URL, { signal: stream.abort.signal, cache: 'no-store' });
+        await connect(stream);
       } catch (error) {
         stopInternal(stream);
         if (current !== generation || isAbortError(error)) return; // stopped meanwhile
-        const message = `could not open ${STREAM_URL}: ${describeError(error)}`;
+        const message = describeError(error);
         onError(message);
         throw new Error(message);
       }
@@ -270,21 +335,7 @@ export function createStreamSource(onError: (message: string) => void = () => {}
         stopInternal(stream);
         return;
       }
-      if (!response.ok) {
-        stopInternal(stream);
-        const message = `${STREAM_URL} responded HTTP ${response.status}`;
-        onError(message);
-        throw new Error(message);
-      }
-      const body = response.body;
-      if (body === null) {
-        stopInternal(stream);
-        const message = `${STREAM_URL} has no readable body`;
-        onError(message);
-        throw new Error(message);
-      }
 
-      stream.reader = body.getReader();
       stream.timer = setInterval(() => pump(stream), PUMP_INTERVAL_MS);
 
       const started = new Promise<void>((resolve) => {
