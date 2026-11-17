@@ -121,7 +121,7 @@ rendered once per process and cached.
 A deployed site has no process, so `scripts/build-audio.ts` renders the same loop at build time and
 writes `stream/pcm` and `api/meta` into `dist/`; the MP3 is copied there by Vite from `public/`, and
 `public/_headers` supplies the isolation headers that the plugin sets in dev. The result is a
-purely static deployment — see the Deploy section of the README.
+purely static deployment — see the Deployment section of the README.
 
 ### Display gain is presentation only
 
@@ -170,7 +170,7 @@ the production build — audio worklets cannot load that.)
 | `server/audio-plugin.ts` | Vite middleware + audio endpoints |
 | `server/synth.ts`, `assets.ts` | deterministic loop, cached assets |
 | `src/audio/tracks.ts` | the bundled MP3 and the stream loop's labels |
-| `public/audio/track.mp3` | the bundled demo track (not MIT — see README) |
+| `public/audio/track.mp3` | the bundled demo track (not MIT — see [CREDITS.md](../CREDITS.md)) |
 | `shared/audio.ts` | constants shared by browser and server |
 
 ## Extending it
@@ -186,4 +186,4 @@ the production build — audio worklets cannot load that.)
 
 No production hardening, no codec handling (the stream is raw PCM), no seeking/gapless playback,
 no mobile layout work, no unit tests for browser APIs (tests cover the pure logic; the browser
-pipeline is verified manually — see the README).
+pipeline is verified manually in a browser).
