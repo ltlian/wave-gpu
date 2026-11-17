@@ -32,7 +32,16 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 const visualizer: Visualizer = await createVisualizer(canvas);
-for (const message of visualizer.errors) errors.add(message);
+
+/** Surface GPU errors that appear after startup, not just the ones from init. */
+let forwardedVisualizerErrors = 0;
+function forwardVisualizerErrors(): void {
+  for (; forwardedVisualizerErrors < visualizer.errors.length; forwardedVisualizerErrors += 1) {
+    const message = visualizer.errors[forwardedVisualizerErrors];
+    if (message !== undefined) errors.add(message);
+  }
+}
+forwardVisualizerErrors();
 stageNote?.remove();
 
 const engine: AudioEngine = createAudioEngine({ onError: (message) => errors.add(message) });
@@ -95,6 +104,7 @@ async function selectEntryPoint(entry: EntryPointId): Promise<void> {
 }
 
 function updateReadout(): void {
+  forwardVisualizerErrors();
   const context = engine.context;
   const worklet = engine.getTap('worklet');
   const analyser = engine.getTap('analyser');

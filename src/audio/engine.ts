@@ -1,0 +1,328 @@
+/**
+ * The audio layer's front door: one lazily created AudioContext, one master
+ * gain, three interchangeable sources and two interchangeable taps.
+ *
+ *                           ┌─ analyser tap  (poll getFloatTimeDomainData)
+ *   source ─▶ masterGain ───┼─ worklet tap   (SAB ring / postMessage)
+ *   (element | decode |      └─ destination  (audible, gain 0.35)
+ *    stream)
+ *
+ * The graph is lazy because an AudioContext cannot reliably start without a
+ * user gesture: the first `start()`/`resume()` — which the UI calls from a
+ * click — creates it. Both taps are attached at that point; switching taps only
+ * changes which one `readFrame()` reads, so the audio path never stutters for a
+ * readout change.
+ *
+ * Source switches are serialised: the previous source is stopped before the
+ * next one starts, so there is never more than one source feeding the gain.
+ * Recoverable failures are reported through `onError` and never thrown out of
+ * the public API — the page (and the visualization) must stay alive.
+ */
+
+import type { AudioEngine, AudioSource, EntryPointId, SampleTap, SourceStats, TapId } from '../types.ts';
+import { createDecodedBufferSource } from './sources/decoded-buffer-source.ts';
+import { createElementSource } from './sources/element-source.ts';
+import { createStreamSource } from './sources/stream-source.ts';
+import { createAnalyserTap } from './taps/analyser-tap.ts';
+import { createWorkletTap } from './taps/worklet-tap.ts';
+import type { WorkletTap } from './taps/worklet-tap.ts';
+
+/** Master gain: the synth loop is rendered close to full scale. */
+const MASTER_GAIN = 0.35;
+/** Entry point used by the first Start click (before one is chosen). */
+const DEFAULT_ENTRY: EntryPointId = 'element';
+const DEFAULT_TAP: TapId = 'worklet';
+const ZERO_STATS: SourceStats = { bytes: 0, chunks: 0 };
+
+export interface AudioEngineOptions {
+  /** Receives human-readable, recoverable failures (shown in the error strip). */
+  onError: (message: string) => void;
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
+  const onError = (message: string): void => options.onError(message);
+
+  let context: AudioContext | null = null;
+  let contextPromise: Promise<AudioContext> | null = null;
+  let masterGain: GainNode | null = null;
+  let analyserTap: SampleTap | null = null;
+  let workletTap: WorkletTap | null = null;
+
+  const sources = new Map<EntryPointId, AudioSource>();
+  let activeEntry: EntryPointId | null = null;
+  let activeTap: TapId = DEFAULT_TAP;
+  let disposed = false;
+  /** Serialises source switches; see `enqueue()`. */
+  let switchChain: Promise<void> = Promise.resolve();
+
+  function getSource(entry: EntryPointId): AudioSource {
+    const existing = sources.get(entry);
+    if (existing !== undefined) return existing;
+    let source: AudioSource;
+    if (entry === 'element') source = createElementSource(onError);
+    else if (entry === 'decode') source = createDecodedBufferSource(onError);
+    else source = createStreamSource(onError);
+    sources.set(entry, source);
+    return source;
+  }
+
+  function enqueue(task: () => Promise<void>): Promise<void> {
+    // Chain onto the previous switch whether it succeeded or failed, and never
+    // let a rejected link poison the queue.
+    const run = switchChain.then(task, task);
+    switchChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  async function createGraph(): Promise<AudioContext> {
+    // 'interactive' asks for the smallest buffer the device supports: good for
+    // a live demo, at the (small) cost of a higher dropout risk.
+    const created = new AudioContext({ latencyHint: 'interactive' });
+    context = created;
+
+    masterGain = created.createGain();
+    masterGain.gain.value = MASTER_GAIN;
+    masterGain.connect(created.destination);
+
+    // Attach both taps eagerly so a tap switch never has to touch the graph.
+    const analyser = createAnalyserTap();
+    const worklet = createWorkletTap({ onError });
+    analyserTap = analyser;
+    workletTap = worklet;
+    for (const tap of [analyser, worklet]) {
+      try {
+        tap.attach(masterGain, created.destination);
+      } catch (error) {
+        onError(`could not attach the ${tap.id} tap: ${describeError(error)}`);
+      }
+    }
+
+    // A context created without a live user gesture starts suspended. That is
+    // not fatal: the click that triggered us, or the next one, calls resume().
+    try {
+      if (created.state !== 'running') await created.resume();
+    } catch {
+      // Autoplay policy only; the controls can retry.
+    }
+    return created;
+  }
+
+  async function ensureContext(): Promise<AudioContext> {
+    if (context !== null) return context;
+    if (contextPromise !== null) return contextPromise;
+    contextPromise = createGraph();
+    try {
+      return await contextPromise;
+    } finally {
+      contextPromise = null;
+    }
+  }
+
+  function stopActiveSource(): void {
+    const entry = activeEntry;
+    activeEntry = null;
+    if (entry === null) return;
+    const source = sources.get(entry);
+    if (source === undefined) return;
+    try {
+      source.stop();
+    } catch (error) {
+      onError(`could not stop the ${entry} source: ${describeError(error)}`);
+    }
+  }
+
+  /** Stop whatever is playing, then start `entry`. Runs inside `enqueue`. */
+  async function startEntry(entry: EntryPointId): Promise<void> {
+    let ctx: AudioContext;
+    try {
+      ctx = await ensureContext();
+    } catch (error) {
+      onError(`audio context could not be created: ${describeError(error)}`);
+      return;
+    }
+    if (disposed) return;
+    const gain = masterGain;
+    if (gain === null) return;
+
+    stopActiveSource();
+    const source = getSource(entry);
+    try {
+      await source.start(ctx, gain);
+      // A stop() may have landed while start() was awaiting (e.g. the decode
+      // fetch): only claim the entry if this source was not superseded.
+      if (disposed) {
+        source.stop();
+        return;
+      }
+      activeEntry = entry;
+    } catch (error) {
+      try {
+        source.stop();
+      } catch {
+        // nothing to clean up
+      }
+      // Sources report their own failures through onError; repeating the same
+      // message here is harmless because the error strip drops duplicates.
+      onError(describeError(error));
+    }
+  }
+
+  async function start(entry: EntryPointId): Promise<void> {
+    if (disposed) return;
+    let ctx: AudioContext;
+    try {
+      ctx = await ensureContext();
+    } catch (error) {
+      onError(`audio context could not be created: ${describeError(error)}`);
+      return;
+    }
+    try {
+      if (ctx.state !== 'running') await ctx.resume();
+    } catch (error) {
+      onError(`AudioContext.resume() was blocked (${describeError(error)}) — press Start again`);
+    }
+    if (disposed) return;
+    if (activeEntry === entry) return; // already the active source
+    await enqueue(() => startEntry(entry));
+  }
+
+  async function setEntryPoint(entry: EntryPointId): Promise<void> {
+    if (disposed || activeEntry === entry) return;
+    await enqueue(() => startEntry(entry));
+  }
+
+  async function pause(): Promise<void> {
+    const ctx = context;
+    if (ctx === null) return;
+    try {
+      await ctx.suspend();
+    } catch (error) {
+      onError(`AudioContext.suspend() failed: ${describeError(error)}`);
+    }
+  }
+
+  async function resume(): Promise<void> {
+    if (disposed) return;
+    let ctx: AudioContext;
+    try {
+      ctx = await ensureContext();
+    } catch (error) {
+      onError(`audio context could not be created: ${describeError(error)}`);
+      return;
+    }
+    try {
+      if (ctx.state !== 'running') await ctx.resume();
+    } catch (error) {
+      onError(`AudioContext.resume() was blocked (${describeError(error)}) — press Start again after interacting with the page`);
+    }
+    // The primary Start button calls resume() before any entry point is chosen,
+    // so that first resume also boots the default source.
+    if (activeEntry === null) await enqueue(() => startEntry(DEFAULT_ENTRY));
+  }
+
+  function setTap(tap: TapId): void {
+    activeTap = tap;
+  }
+
+  /** Scratch buffer used to refresh the non-active tap (readout only). */
+  let levelScratch: Float32Array | null = null;
+
+  function readFrame(out: Float32Array): boolean {
+    if (activeEntry === null) return false;
+    const ctx = context;
+    if (ctx === null || ctx.state !== 'running') return false;
+    const tap = activeTap === 'worklet' ? workletTap : analyserTap;
+    if (tap === null) return false;
+    try {
+      // Keep the other tap warm too: the readout shows both read paths, and the
+      // graph does not care which one the frame loop consumes.
+      const other = activeTap === 'worklet' ? analyserTap : workletTap;
+      if (other !== null) {
+        if (levelScratch === null || levelScratch.length !== out.length) {
+          levelScratch = new Float32Array(out.length);
+        }
+        try {
+          other.read(levelScratch);
+        } catch {
+          // A stale level is cosmetic; never let it break the frame loop.
+        }
+      }
+      return tap.read(out);
+    } catch (error) {
+      onError(`reading the ${tap.id} tap failed: ${describeError(error)}`);
+      return false;
+    }
+  }
+
+  function getTap(tap: TapId): SampleTap | null {
+    return tap === 'worklet' ? workletTap : analyserTap;
+  }
+
+  function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    stopActiveSource();
+    for (const source of sources.values()) {
+      try {
+        source.stop();
+      } catch {
+        // already stopped
+      }
+    }
+    sources.clear();
+    analyserTap?.dispose();
+    workletTap?.dispose();
+    analyserTap = null;
+    workletTap = null;
+    if (masterGain !== null) {
+      try {
+        masterGain.disconnect();
+      } catch {
+        // already disconnected
+      }
+      masterGain = null;
+    }
+    const ctx = context;
+    context = null;
+    if (ctx !== null) void ctx.close().catch(() => {});
+  }
+
+  return {
+    get context() {
+      return context;
+    },
+    get activeEntry() {
+      return activeEntry;
+    },
+    get activeTap() {
+      return activeTap;
+    },
+    get paused() {
+      return context !== null && context.state === 'suspended';
+    },
+    get ring() {
+      return workletTap?.ring ?? false;
+    },
+    get stats() {
+      if (activeEntry === null) return ZERO_STATS;
+      return sources.get(activeEntry)?.stats ?? ZERO_STATS;
+    },
+    ensureContext,
+    start,
+    setEntryPoint,
+    setTap,
+    pause,
+    resume,
+    readFrame,
+    getTap,
+    dispose,
+  };
+}
