@@ -1,16 +1,19 @@
 /**
- * Backend selection and the display-side frame preparation.
+ * Backend selection, runtime switching and the display-side frame preparation.
  *
  * `createVisualizer(canvas)` tries WebGPU first; if any part of that fails it
  * records a human-readable reason and builds the Canvas2D renderer instead, so
- * the app always has something to draw into. Everything here is display-only:
- * the audio tap owns the samples and `src/main.ts` owns the raw RMS/peak values,
- * so this module never writes to the caller's buffer — the auto-gain is applied
- * to an internal copy and the raw meta values only drive colour.
+ * the app always has something to draw into. Both backends stay available to
+ * the UI afterwards (`setBackend()`), which is what the renderer control uses
+ * to compare them on a machine that supports both. Everything here is
+ * display-only: the audio tap owns the samples and `src/main.ts` owns the raw
+ * RMS/peak values, so this module never writes to the caller's buffer — the
+ * auto-gain is applied to an internal copy and the raw meta values only drive
+ * colour.
  */
 
 import { FRAME_SAMPLES } from '../../shared/audio.ts';
-import type { FrameMeta, Visualizer } from '../types.ts';
+import type { FrameMeta, RendererId, Visualizer } from '../types.ts';
 import { createCanvas2dBackend } from './canvas2d.ts';
 import { createDisplayGain } from './display-gain.ts';
 import { createWebGpuBackend } from './webgpu.ts';
@@ -36,7 +39,7 @@ export interface BackendFrame {
 }
 
 export interface RenderBackend {
-  readonly backend: 'webgpu' | '2d';
+  readonly backend: RendererId;
   resize(size: CanvasSize): void;
   render(frame: BackendFrame): void;
   destroy(): void;
@@ -68,12 +71,17 @@ function createBlankVisualizer(errors: string[]): Visualizer {
     backend: '2d',
     ready: false,
     errors,
+    webgpuAvailable: false,
+    webgpuUnavailableReason: null,
     displayGain: 1,
     frames: 0,
     render() {
       // Nothing can draw: stay silent instead of throwing from the frame loop.
     },
     resize() {},
+    async setBackend() {
+      // No backend exists to switch away from.
+    },
     destroy() {},
   };
 }
@@ -88,46 +96,84 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
   };
 
   let target = canvas;
-  let backend: RenderBackend | null = null;
+  let renderer: RenderBackend | null = null;
+  let kind: RendererId | null = null;
+  let webgpuAvailable = false;
+  let webgpuUnavailableReason: string | null = null;
 
-  try {
-    backend = await createWebGpuBackend(target, report);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    report(`WebGPU initialisation failed unexpectedly: ${message} — the Canvas2D fallback will be used.`);
+  /**
+   * A canvas that has handed out one context type can never hand out the other,
+   * so switching backends (or recovering from a failed WebGPU attempt) swaps in
+   * an identical, context-free clone and keeps drawing into that. `cloneNode`
+   * also copies the current backing-store size, so the swap does not flash.
+   */
+  function replaceCanvas(): boolean {
+    const clone = target.cloneNode(false) as HTMLCanvasElement;
+    if (!target.parentNode) return false;
+    target.parentNode.replaceChild(clone, target);
+    target = clone;
+    return true;
   }
 
-  if (!backend) {
-    // Collect Canvas2D creation messages instead of reporting them immediately:
-    // on a canvas already bound to a 'webgpu' context getContext('2d') returns
-    // null, and the replacement-canvas path below then succeeds. Reporting the
-    // first attempt's message in that case would be misleading.
-    const fallbackMessages: string[] = [];
-    backend = createCanvas2dBackend(target, (message) => fallbackMessages.push(message));
-    if (!backend) {
-      // cloneNode() preserves the element type, so this assertion is safe; using
-      // the cast keeps the code independent of a global HTMLCanvasElement binding.
-      const clone = canvas.cloneNode(false) as HTMLCanvasElement;
-      if (canvas.parentNode) {
-        canvas.parentNode.replaceChild(clone, canvas);
-        target = clone;
-        backend = createCanvas2dBackend(clone, report);
-        if (backend) {
+  /** Mount WebGPU on the current canvas, recording why it failed if it did. */
+  async function mountWebGpu(): Promise<boolean> {
+    const reasonStart = errors.length;
+    try {
+      const next = await createWebGpuBackend(target, report);
+      if (next) {
+        renderer = next;
+        kind = 'webgpu';
+        webgpuAvailable = true;
+        webgpuUnavailableReason = null;
+        return true;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      report(`WebGPU initialisation failed unexpectedly: ${message} — the Canvas2D fallback will be used.`);
+    }
+    webgpuAvailable = false;
+    webgpuUnavailableReason = errors[reasonStart] ?? 'WebGPU is not available in this browser.';
+    return false;
+  }
+
+  /**
+   * Mount Canvas2D on the current canvas, replacing the element if a WebGPU
+   * attempt has bound it. `quiet` suppresses the replacement note for a
+   * user-initiated switch, where a fresh element is expected rather than a
+   * fallback.
+   */
+  function mountCanvas2d(quiet: boolean): boolean {
+    // Collect the first attempt's messages instead of reporting them
+    // immediately: on a canvas already bound to a 'webgpu' context
+    // getContext('2d') returns null, and the replacement-canvas path below then
+    // succeeds. Reporting the first attempt's message in that case would be
+    // misleading.
+    const attemptMessages: string[] = [];
+    const first = createCanvas2dBackend(target, (message) => attemptMessages.push(message));
+    if (first) {
+      renderer = first;
+      kind = '2d';
+      return true;
+    }
+    if (replaceCanvas()) {
+      const second = createCanvas2dBackend(target, report);
+      if (second) {
+        renderer = second;
+        kind = '2d';
+        if (!quiet) {
           report('WebGPU left the stage canvas bound to a GPU context; the Canvas2D fallback used a replacement canvas.');
-        } else {
-          for (const message of fallbackMessages) report(message);
         }
-      } else {
-        for (const message of fallbackMessages) report(message);
+        return true;
       }
     }
+    for (const message of attemptMessages) report(message);
+    return false;
   }
 
-  if (!backend) {
+  if (!(await mountWebGpu()) && !mountCanvas2d(false)) {
     report('No rendering backend is available — the stage will stay blank.');
     return createBlankVisualizer(errors);
   }
-  const renderer = backend;
 
   const drawSamples = new Float32Array(FRAME_SAMPLES);
   const displayGain = createDisplayGain();
@@ -185,7 +231,7 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
   }
 
   function applySize(): void {
-    if (destroyed) return;
+    if (destroyed || renderer === null) return;
     try {
       renderer.resize(measure());
     } catch (error) {
@@ -196,13 +242,48 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
 
   // ResizeObserver covers layout changes of the stage panel; the window listener
   // also catches a devicePixelRatio change (e.g. moving to another display).
+  // The observer is re-pointed whenever a backend switch replaces the canvas.
   const observer = new ResizeObserver(applySize);
   observer.observe(target);
   window.addEventListener('resize', applySize);
   applySize();
 
+  function attachToCanvas(): void {
+    observer.disconnect();
+    observer.observe(target);
+    applySize();
+  }
+
+  /**
+   * Switch drawing backends without disturbing the audio/readout side. The
+   * current renderer is torn down and a fresh canvas element is used, because a
+   * canvas cannot change context type once it has handed one out.
+   */
+  async function setBackend(next: RendererId): Promise<void> {
+    if (destroyed || next === kind) return;
+    if (next === 'webgpu' && !webgpuAvailable) return;
+    renderer?.destroy();
+    renderer = null;
+    kind = null;
+    replaceCanvas();
+    if (next === 'webgpu') {
+      if (await mountWebGpu()) {
+        attachToCanvas();
+        return;
+      }
+      // WebGPU failed on a canvas that worked before (e.g. the GPU went away):
+      // keep the page drawing by falling back.
+      replaceCanvas();
+    }
+    if (mountCanvas2d(true)) {
+      attachToCanvas();
+    } else {
+      report('No rendering backend is available — the stage will stay blank.');
+    }
+  }
+
   function render(input: Float32Array, meta: FrameMeta): void {
-    if (destroyed) return;
+    if (destroyed || renderer === null) return;
 
     const count = Math.min(input.length, FRAME_SAMPLES);
     drawSamples.set(input.subarray(0, count), 0);
@@ -239,16 +320,27 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
     observer.disconnect();
     window.removeEventListener('resize', applySize);
     try {
-      renderer.destroy();
+      renderer?.destroy();
     } catch {
       // The backend is being torn down; nothing left to report.
     }
+    renderer = null;
   }
 
   return {
-    backend: renderer.backend,
-    ready: true,
+    get backend(): RendererId {
+      return kind ?? '2d';
+    },
+    get ready(): boolean {
+      return renderer !== null;
+    },
     errors,
+    get webgpuAvailable(): boolean {
+      return webgpuAvailable;
+    },
+    get webgpuUnavailableReason(): string | null {
+      return webgpuUnavailableReason;
+    },
     get displayGain(): number {
       return appliedGain;
     },
@@ -257,6 +349,7 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
     },
     render,
     resize: applySize,
+    setBackend,
     destroy,
   };
 }

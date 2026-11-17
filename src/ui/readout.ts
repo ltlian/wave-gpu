@@ -101,7 +101,13 @@ export function createReadout(root: ParentNode): Readout {
     setBadge(
       'gpu',
       `gpu: ${state.gpuBackend}${state.gpuReady ? '' : ' (not ready)'}`,
-      state.gpuReady && state.gpuBackend === 'webgpu' ? 'live' : 'warn',
+      // Warning is for "WebGPU was wanted but is not usable"; a 2D backend
+      // chosen from the renderer control while WebGPU works is neutral.
+      state.gpuReady && state.gpuBackend === 'webgpu'
+        ? 'live'
+        : state.gpuReady && state.webgpuAvailable
+          ? 'neutral'
+          : 'warn',
     );
     const ringLabel = state.ring ? 'SAB' : contextIdle ? NO_VALUE : 'postMessage';
     setBadge('ring', `ring: ${ringLabel}`, state.ring ? 'live' : contextIdle ? 'neutral' : 'warn');

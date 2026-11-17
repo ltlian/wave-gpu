@@ -18,14 +18,14 @@ of the full track would be ~80 MB.
 - Two read paths: an `AnalyserNode` and an `AudioWorklet` with a `SharedArrayBuffer` ring (falls
   back to `postMessage` without cross-origin isolation).
 - One WebGPU consumer: 2048-sample frame → compute pass → WGSL waveform, with a Canvas2D fallback
-  and a display-only auto-gain.
+  you can switch to from the renderer control, and a display-only auto-gain.
 - Live readout of the context, both taps, the PCM stream and the GPU, plus a `window.__wave` probe.
 
 ## Requirements
 
 - Node 24 or newer (CI uses 26).
 - A WebGPU-capable browser (verified in Chrome); without WebGPU the visualization falls back to
-  Canvas2D.
+  Canvas2D and the renderer control shows WebGPU as unavailable.
 - Cross-origin isolation for the `SharedArrayBuffer` ring — the dev server and
   [public/_headers](public/_headers) set the COOP/COEP headers for you.
 
@@ -65,7 +65,7 @@ isolation headers come from [public/_headers](public/_headers).
 ```
 src/audio/sources/      the four entry points
 src/audio/taps/         the two read paths
-src/gpu/                WebGPU consumer and Canvas2D fallback
+src/gpu/                WebGPU and Canvas2D renderers (switchable at runtime)
 server/                 dev-server audio endpoints (synth, PCM stream)
 scripts/build-audio.ts  build-time audio assets for the deployed site
 shared/audio.ts         constants shared by the browser app and the server

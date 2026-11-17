@@ -26,7 +26,14 @@ export interface ProbeSnapshot {
     analyser: { rms: number; peak: number };
   };
   stream: { bytes: number; chunks: number };
-  gpu: { backend: string; ready: boolean; frames: number; errors: string[]; displayGain: number };
+  gpu: {
+    backend: string;
+    ready: boolean;
+    webgpuAvailable: boolean;
+    frames: number;
+    errors: string[];
+    displayGain: number;
+  };
   errors: string[];
 }
 
@@ -87,6 +94,7 @@ export function installDebugHook(deps: DebugDeps): void {
       gpu: {
         backend: visualizer.backend,
         ready: visualizer.ready,
+        webgpuAvailable: visualizer.webgpuAvailable,
         frames: visualizer.frames,
         errors: [...visualizer.errors],
         displayGain: visualizer.displayGain,

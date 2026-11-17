@@ -19,7 +19,7 @@ import { installDebugHook } from './debug.ts';
 import { STREAM_LOOP_LABEL, TRACK_LABEL } from './audio/tracks.ts';
 import { createIdlePreview } from './idle-preview.ts';
 import { FRAME_SAMPLES } from '../shared/audio.ts';
-import type { AudioEngine, EntryPointId, ReadoutState, TapId, Visualizer } from './types.ts';
+import type { AudioEngine, EntryPointId, ReadoutState, RendererId, TapId, Visualizer } from './types.ts';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#stage');
 const stageNote = document.querySelector<HTMLElement>('#stage-note');
@@ -71,6 +71,9 @@ const controls = createControls(document, {
     engine.setTap(tap);
     controls.setTap(tap);
   },
+  onRenderer: (renderer) => {
+    void switchRenderer(renderer);
+  },
 });
 const readout = createReadout(document);
 
@@ -85,6 +88,23 @@ function describeTrack(entry: EntryPointId | null): string {
 let playing = false;
 let busy = false;
 let fps = 0;
+let switchingRenderer = false;
+
+/**
+ * Swap the drawing backend. The audio graph, tap selection and readout are all
+ * untouched; only the renderer behind the stage canvas changes.
+ */
+async function switchRenderer(renderer: RendererId): Promise<void> {
+  if (switchingRenderer || visualizer.backend === renderer) return;
+  switchingRenderer = true;
+  try {
+    await visualizer.setBackend(renderer);
+  } finally {
+    switchingRenderer = false;
+    forwardVisualizerErrors();
+    updateReadout();
+  }
+}
 
 async function togglePlayback(): Promise<void> {
   if (busy) return;
@@ -170,6 +190,7 @@ function updateReadout(): void {
     streamChunks: engine.stats.chunks,
     gpuBackend: visualizer.backend,
     gpuReady: visualizer.ready,
+    webgpuAvailable: visualizer.webgpuAvailable,
     displayGain: visualizer.displayGain,
     fps,
   };
@@ -177,6 +198,8 @@ function updateReadout(): void {
   controls.setPlaying(playing);
   controls.setEntryPoint(engine.activeEntry ?? 'element');
   controls.setTap(engine.activeTap);
+  controls.setRenderer(visualizer.backend);
+  controls.setRendererAvailable('webgpu', visualizer.webgpuAvailable, visualizer.webgpuUnavailableReason);
 }
 
 installDebugHook({

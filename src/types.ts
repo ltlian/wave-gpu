@@ -16,6 +16,10 @@ export type EntryPointId = (typeof ENTRY_POINT_IDS)[number];
 export const TAP_IDS = ['worklet', 'analyser'] as const;
 export type TapId = (typeof TAP_IDS)[number];
 
+/** The two drawing backends; the user can switch between them at runtime. */
+export const RENDERER_IDS = ['webgpu', '2d'] as const;
+export type RendererId = (typeof RENDERER_IDS)[number];
+
 export interface SourceStats {
   bytes: number;
   chunks: number;
@@ -71,13 +75,19 @@ export interface FrameMeta {
 
 /** The consumer: anything that can draw a frame of samples. */
 export interface Visualizer {
-  readonly backend: 'webgpu' | '2d';
+  readonly backend: RendererId;
   readonly ready: boolean;
   readonly errors: readonly string[];
+  /** True while WebGPU can be selected; false after a failed initialisation. */
+  readonly webgpuAvailable: boolean;
+  /** Why WebGPU is unavailable, for the disabled control's tooltip. */
+  readonly webgpuUnavailableReason: string | null;
   readonly displayGain: number;
   readonly frames: number;
   render(samples: Float32Array, meta: FrameMeta): void;
   resize(): void;
+  /** Switch drawing backends; a no-op when already active or unavailable. */
+  setBackend(backend: RendererId): Promise<void>;
   destroy(): void;
 }
 
@@ -132,6 +142,8 @@ export interface ReadoutState {
   streamChunks: number;
   gpuBackend: string;
   gpuReady: boolean;
+  /** Whether the WebGPU backend is selectable at all (for the badge tone). */
+  webgpuAvailable: boolean;
   displayGain: number;
   fps: number;
 }

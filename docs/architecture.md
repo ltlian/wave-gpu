@@ -29,7 +29,7 @@ samples came from an `<audio>` element, a decoded buffer, or a network stream.
                                                     ▼
                     ┌─────────────────────────── src/gpu/ ─────────────────────────────┐
  consumer           │  webgpu.ts   compute pass: 256 columns → min/max/centre/rms       │
-                    │  canvas2d.ts fallback if WebGPU is unavailable                     │
+                    │  canvas2d.ts  same picture, drawn with Canvas2D paths              │
                     └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -61,6 +61,11 @@ visualizer, wires the UI, runs a `requestAnimationFrame` loop, and assembles the
    triangle with a fragment shader that reads those columns.
 6. **The UI** is refreshed at ~10 Hz from the same engine/visualizer state. Errors from any layer
    go to the error strip (and the `window.__wave` probe).
+7. **The renderer control** switches the visualizer between the WebGPU and Canvas2D backends while
+   it runs. Only the drawing changes: the audio graph, tap selection and readout are untouched.
+   Because a canvas cannot change context type once it has handed one out, a switch swaps in an
+   identical `<canvas>` element (`cloneNode`, which copies the backing-store size). The WebGPU
+   button is disabled, with the failure reason as its tooltip, when the startup attempt failed.
 
 ## Interesting details
 
@@ -146,6 +151,8 @@ Canvas2D backend. One failure mode needs extra care: a browser whose GPU stack i
 page then waits on a black canvas with no error. Each awaited initialisation call is therefore
 wrapped in `awaitWithin()` (5 s): on timeout it reports why and the Canvas2D fallback takes over.
 The error strip is mirrored to the console (`ui/errors.ts`), so the reason is visible in DevTools.
+A failed attempt also disables the WebGPU option in the renderer control, with the same reason as
+its tooltip.
 
 ### AudioWorklet in a Vite build
 
@@ -171,9 +178,9 @@ the production build — audio worklets cannot load that.)
 | `src/audio/taps/*.ts` | `AnalyserNode` tap and `AudioWorklet` tap |
 | `src/audio/worklet/capture-worklet.ts` | audio-thread processor, SAB ring, stats |
 | `src/audio/pcm.ts` | pure interleaved-f32 chunk helpers (unit-tested) |
-| `src/gpu/visualizer.ts` | backend selection, errors, display gain |
+| `src/gpu/visualizer.ts` | backend selection + runtime switching, errors, display gain |
 | `src/gpu/webgpu.ts`, `shaders.ts` | compute + render pipeline, WGSL |
-| `src/gpu/canvas2d.ts` | fallback renderer |
+| `src/gpu/canvas2d.ts` | Canvas2D renderer (fallback / selectable) |
 | `src/gpu/display-gain.ts` | pure rolling-peak normalisation (unit-tested) |
 | `src/ui/*.ts` | controls, readout, error strip, file drop/picker (DOM only) |
 | `server/audio-plugin.ts` | Vite middleware + audio endpoints |
