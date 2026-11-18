@@ -78,6 +78,7 @@ isolation headers come from [public/_headers](public/_headers).
 src/audio/sources/      the four entry points
 src/audio/taps/         the two read paths
 src/gpu/                three renderers (WebGPU, Canvas2D, SVG) + cached stage backdrop
+src/render-loop.ts      frame loop: play/visibility gating, idle frame, fps
 src/quality.ts          high/low performance tier selection
 server/                 dev-server audio endpoints (synth, PCM stream)
 scripts/build-audio.ts  build-time audio assets for the deployed site

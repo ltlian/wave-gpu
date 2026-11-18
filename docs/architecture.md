@@ -34,8 +34,10 @@ samples came from an `<audio>` element, a decoded buffer, or a network stream.
                     └─────────────────────────────────────────────────────────────────┘
 ```
 
-`src/main.ts` is the only file that knows about all three layers. It builds the engine and the
-visualizer, wires the UI, runs a `requestAnimationFrame` loop, and assembles the readout snapshot.
+`src/main.ts` is the only file that constructs all three layers: it builds the engine and the
+visualizer, wires the UI, and assembles the readout snapshot. `src/render-loop.ts` drives them
+through the `AudioEngine` and `Visualizer` interfaces and owns the `requestAnimationFrame` loop and
+its play/visibility gating; the pipeline trace and accents are separate DOM-only modules.
 `src/ui/pipeline-trace.ts` is the only file that knows the three columns form a path: it measures the
 selected chips, writes the SVG trace between them, and carries it up into the stage's bottom frame,
 reading the selection back from the buttons.
@@ -57,8 +59,8 @@ reading the selection back from the buttons.
    resources. Sources connect to `masterGain`; switching stops the previous source first.
 3. **Both taps sit on `masterGain`, always.** The analyser branch is passive. The worklet tap
    reads through a silent `GainNode(0)` → `destination` so the graph keeps pulling it.
-4. **While audio plays and the stage is on screen**, `main.ts` runs an animation frame loop that
-   calls `engine.readFrame(buffer)` (active tap), computes raw RMS/peak, and calls
+4. **While audio plays and the stage is on screen**, `render-loop.ts` runs an animation frame loop
+   that calls `engine.readFrame(buffer)` (active tap), computes raw RMS/peak, and calls
    `visualizer.render(buffer, meta)`. When paused, or when the stage is scrolled out of view, the
    loop stops; a single static idle frame is drawn at startup, on resize and after a paused backend
    switch so the canvas is never blank.
@@ -204,7 +206,8 @@ a visible quality drop — this is a worked example, not a visual showcase.
 
 | Path | What it is |
 |---|---|
-| `src/main.ts` | wiring, rAF loop, readout assembly, idle preview fallback |
+| `src/main.ts` | wiring and readout assembly |
+| `src/render-loop.ts` | rAF loop, play/visibility gating, static idle frame |
 | `src/types.ts` | the layer contracts |
 | `src/audio/engine.ts` | AudioContext, master gain, source switching, pause/resume |
 | `src/audio/sources/*.ts` | the four entry points (element, decode, stream, file) |
@@ -213,6 +216,7 @@ a visible quality drop — this is a worked example, not a visual showcase.
 | `src/audio/pcm.ts` | pure interleaved-f32 chunk helpers (unit-tested) |
 | `src/quality.ts` | high/low tier selection and the numbers each tier uses |
 | `src/gpu/stage-backdrop.ts` | cached backdrop, halo, grid and centre line for Canvas2D/SVG |
+| `src/gpu/envelope.ts` | shared per-column amplitude summary for Canvas2D/SVG |
 | `src/gpu/visualizer.ts` | backend selection + runtime switching, errors, display gain |
 | `src/gpu/webgpu.ts`, `shaders.ts` | compute + render pipeline, WGSL |
 | `src/gpu/canvas2d.ts` | Canvas2D renderer (fallback / selectable) |

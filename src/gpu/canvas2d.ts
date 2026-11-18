@@ -9,6 +9,7 @@
  */
 
 import { FRAME_SAMPLES } from '../../shared/audio.ts';
+import { createColumnEnvelope } from './envelope.ts';
 import type { BackendFrame, CanvasSize, RenderBackend } from './visualizer.ts';
 
 export interface Canvas2dOptions {
@@ -55,11 +56,8 @@ export function createCanvas2dBackend(
     return null;
   }
   const ctx = context;
-  const columns = Math.max(16, Math.min(FRAME_SAMPLES, Math.round(options.columns)));
-  const samplesPerColumn = FRAME_SAMPLES / columns;
-
-  const amplitudes = new Float32Array(columns);
-  const smoothed = new Float32Array(columns);
+  const envelope = createColumnEnvelope(Math.max(16, Math.min(FRAME_SAMPLES, Math.round(options.columns))));
+  const columns = envelope.columns;
   let dpr = 1;
   let cssWidth = 1;
   let cssHeight = 1;
@@ -74,33 +72,6 @@ export function createCanvas2dBackend(
     const height = Math.max(1, Math.round(cssHeight * dpr));
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
-  }
-
-  /** 2048 samples → symmetric half-amplitudes per column, plus one smoothing pass. */
-  function computeAmps(samples: Float32Array): void {
-    for (let column = 0; column < columns; column++) {
-      const base = column * samplesPerColumn;
-      let minimum = 1;
-      let maximum = -1;
-      let sum = 0;
-      for (let i = 0; i < samplesPerColumn; i++) {
-        const value = samples[base + i];
-        if (value < minimum) minimum = value;
-        if (value > maximum) maximum = value;
-        sum += value;
-      }
-      const center = sum / samplesPerColumn;
-      const left = Math.abs(maximum - center);
-      const right = Math.abs(center - minimum);
-      amplitudes[column] = left > right ? left : right;
-    }
-    // One neighbour pass keeps column edges from looking like a picket fence.
-    for (let column = 0; column < columns; column++) {
-      const left = amplitudes[column > 0 ? column - 1 : column];
-      const right = amplitudes[column < columns - 1 ? column + 1 : column];
-      smoothed[column] = (left + amplitudes[column] * 2 + right) * 0.25;
-    }
-    amplitudes.set(smoothed);
   }
 
   function render(frame: BackendFrame): void {
@@ -121,23 +92,17 @@ export function createCanvas2dBackend(
     ctx.clearRect(0, 0, width, height);
 
     // ---- palette driven by the raw display level --------------------------
-    computeAmps(frame.samples);
+    envelope.compute(frame.samples);
     const leftColor = mix(VIOLET, CYAN, 0.08 + energy * 0.22);
     const rightColor = mix(VIOLET, CYAN, 0.78 + energy * 0.18);
     const fillAlpha = 0.26 + energy * 0.34;
     const rimAlpha = Math.min(1, (0.68 + energy * 0.32) * breathe);
     const rimColor = mix(WHITE, VIOLET, 0.32);
 
-    // Normalise this backend's own columns so the drawn envelope lands on the
-    // same target height no matter how many samples a column summarises.
-    let ampPeak = 0;
-    for (let column = 0; column < columns; column++) {
-      if (amplitudes[column] > ampPeak) ampPeak = amplitudes[column];
-    }
-    const ampScale = ampPeak > 1e-5 ? 0.42 / ampPeak : 0;
+    const { ampScale } = envelope;
     const xAt = (column: number): number => ((column + 0.5) / columns) * width;
     const halfAt = (column: number): number =>
-      Math.min(height * 0.49, Math.max(1.5, (amplitudes[column] * ampScale + 0.008) * height));
+      Math.min(height * 0.49, Math.max(1.5, (envelope.amplitudes[column] * ampScale + 0.008) * height));
 
     const fill = ctx.createLinearGradient(0, 0, width, 0);
     fill.addColorStop(0, rgba(leftColor, fillAlpha));

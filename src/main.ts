@@ -1,6 +1,6 @@
 /**
- * Wiring only: build the engine + visualizer, bind the controls, run the frame
- * loop, and expose a small read-only probe for debugging/verification.
+ * Wiring only: build the engine + visualizer, bind the controls, connect the
+ * render loop, and expose a small read-only probe for debugging/verification.
  *
  * Everything interesting lives one directory down:
  *   audio/  — how audio gets into the graph and how it is tapped
@@ -19,15 +19,10 @@ import { createPipelineTrace } from './ui/pipeline-trace.ts';
 import { createReadout } from './ui/readout.ts';
 import { installDebugHook } from './debug.ts';
 import { STREAM_LOOP_LABEL, TRACK_LABEL } from './audio/tracks.ts';
-import { quality } from './quality.ts';
-import { createIdlePreview } from './idle-preview.ts';
-import { FRAME_SAMPLES } from '../shared/audio.ts';
+import { createRenderLoop } from './render-loop.ts';
 import type { AudioEngine, EntryPointId, ReadoutState, RendererId, TapId, Visualizer } from './types.ts';
 
-document.body.classList.toggle('low-quality', quality.tier === 'low');
-
 const canvas = document.querySelector<HTMLCanvasElement>('#stage');
-const stageNote = document.querySelector<HTMLElement>('#stage-note');
 if (!canvas) throw new Error('missing #stage canvas');
 
 const errors = createErrorStrip(document);
@@ -49,7 +44,6 @@ function forwardVisualizerErrors(): void {
   }
 }
 forwardVisualizerErrors();
-stageNote?.remove();
 
 const engine: AudioEngine = createAudioEngine({ onError: (message) => errors.add(message) });
 
@@ -75,6 +69,9 @@ const controls = createControls(document, {
   onTap: (tap) => {
     engine.setTap(tap);
     controls.setTap(tap);
+    // Tapping a layer while paused changes no audio graph state the loop would
+    // notice, so refresh the readout and trace explicitly.
+    updateReadout();
   },
   onRenderer: (renderer) => {
     void switchRenderer(renderer);
@@ -94,7 +91,6 @@ function describeTrack(entry: EntryPointId | null): string {
 
 let playing = false;
 let busy = false;
-let fps = 0;
 let switchingRenderer = false;
 
 /**
@@ -109,7 +105,7 @@ async function switchRenderer(renderer: RendererId): Promise<void> {
   } finally {
     switchingRenderer = false;
     forwardVisualizerErrors();
-    if (!playing) renderIdleFrame(performance.now());
+    if (!playing) loop.drawIdle();
     updateReadout();
   }
 }
@@ -131,7 +127,7 @@ async function togglePlayback(): Promise<void> {
     controls.setBusy(false);
     controls.setPlaying(playing);
     updateReadout();
-    syncLoop();
+    loop.sync();
   }
 }
 
@@ -151,7 +147,7 @@ async function selectEntryPoint(entry: EntryPointId): Promise<void> {
     busy = false;
     controls.setBusy(false);
     updateReadout();
-    syncLoop();
+    loop.sync();
   }
 }
 
@@ -171,7 +167,7 @@ async function loadFile(file: File): Promise<void> {
     controls.setBusy(false);
     controls.setPlaying(playing);
     updateReadout();
-    syncLoop();
+    loop.sync();
   }
 }
 
@@ -202,7 +198,7 @@ function updateReadout(): void {
     rendererBackend: visualizer.backend,
     rendererReady: visualizer.ready,
     displayGain: visualizer.displayGain,
-    fps,
+    fps: loop.fps,
   };
   readout.update(state);
   controls.setPlaying(playing);
@@ -213,6 +209,14 @@ function updateReadout(): void {
   trace.update();
 }
 
+const loop = createRenderLoop({
+  engine,
+  visualizer,
+  accent,
+  isPlaying: () => playing,
+  onReadout: updateReadout,
+});
+
 installDebugHook({
   engine,
   visualizer,
@@ -220,122 +224,9 @@ installDebugHook({
   isPlaying: () => playing,
   setPlaying: (value) => {
     playing = value;
+    loop.sync();
   },
 });
 
-const idlePreview = createIdlePreview(FRAME_SAMPLES);
-const frame = new Float32Array(FRAME_SAMPLES);
-
-let framesSinceSample = 0;
-let sampledAt = performance.now();
-let readoutAt = 0;
-let loopRunning = false;
-let rafId = 0;
-let lastRenderAt = 0;
-let stageVisible = true;
-
-function measure(samples: Float32Array): { rms: number; peak: number } {
-  let sumSquares = 0;
-  let peak = 0;
-  for (const value of samples) {
-    sumSquares += value * value;
-    const magnitude = value < 0 ? -value : value;
-    if (magnitude > peak) peak = magnitude;
-  }
-  return { rms: Math.sqrt(sumSquares / samples.length), peak };
-}
-
-/**
- * One static idle frame. Drawn at startup, on resize and after a backend switch
- * while paused — never on a timer. The loop only runs while audio is playing and
- * the stage is on screen, so a paused phone does no rendering at all.
- */
-function renderIdleFrame(now: number): void {
-  idlePreview.write(frame, now);
-  visualizer.render(frame, { rms: 0, peak: 0 });
-  accent.reset();
-}
-
-function stopLoop(): void {
-  loopRunning = false;
-  if (rafId !== 0) {
-    cancelAnimationFrame(rafId);
-    rafId = 0;
-  }
-  document.body.classList.remove('is-animating');
-  accent.reset();
-}
-
-function startLoop(): void {
-  if (loopRunning || !playing || document.hidden || !stageVisible) return;
-  loopRunning = true;
-  document.body.classList.add('is-animating');
-  lastRenderAt = 0;
-  framesSinceSample = 0;
-  sampledAt = performance.now();
-  rafId = requestAnimationFrame(tick);
-}
-
-function syncLoop(): void {
-  if (playing && !document.hidden && stageVisible) startLoop();
-  else stopLoop();
-}
-
-function tick(now: number): void {
-  rafId = 0;
-  if (!loopRunning) return;
-
-  // The low tier renders at 30 fps; the readout still refreshes at 10 Hz.
-  // The 0.85 tolerance keeps a 60 Hz display from landing just under two
-  // intervals and silently dropping to 20 fps.
-  if (now - lastRenderAt < (1000 / quality.maxFps) * 0.85) {
-    rafId = requestAnimationFrame(tick);
-    return;
-  }
-  lastRenderAt = now;
-
-  const live = engine.readFrame(frame);
-  if (!live) idlePreview.write(frame, now);
-  const meta = live ? measure(frame) : { rms: 0, peak: 0 };
-  visualizer.render(frame, meta);
-  accent.update(meta.rms, meta.peak, now);
-
-  framesSinceSample += 1;
-  const elapsed = now - sampledAt;
-  if (elapsed >= 500) {
-    fps = Math.round((framesSinceSample * 1000) / elapsed);
-    framesSinceSample = 0;
-    sampledAt = now;
-  }
-  if (now - readoutAt >= 100) {
-    readoutAt = now;
-    updateReadout();
-  }
-  rafId = requestAnimationFrame(tick);
-}
-
-const stage = document.querySelector<HTMLElement>('.stage');
-if (stage !== null && 'IntersectionObserver' in globalThis) {
-  new IntersectionObserver(
-    (entries) => {
-      const entry = entries[entries.length - 1];
-      stageVisible = entry?.isIntersecting ?? true;
-      syncLoop();
-    },
-    { threshold: 0 },
-  ).observe(stage);
-}
-document.addEventListener('visibilitychange', syncLoop);
-globalThis.addEventListener('resize', () => {
-  if (!playing) {
-    // Double rAF: let the visualizer's ResizeObserver resize the canvas first.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (!playing) renderIdleFrame(performance.now());
-      });
-    });
-  }
-});
-
-renderIdleFrame(performance.now());
+loop.drawIdle();
 updateReadout();

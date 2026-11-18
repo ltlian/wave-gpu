@@ -63,7 +63,7 @@ body {
 }
 
 .header h1 {
-  margin: 0 0 6px;
+  margin: 0;
   font-size: clamp(21px, 2.4vw, 28px);
   font-weight: 650;
   letter-spacing: -0.02em;
@@ -71,14 +71,6 @@ body {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-}
-
-.subtitle {
-  margin: 0;
-  max-width: 68ch;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 13px;
 }
 
 /* ---- header badges ------------------------------------------------------ */
@@ -182,28 +174,6 @@ body {
 .stage-svg.no-glow .wave-fill {
   filter: none;
 }
-
-.stage-note {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  padding: 20px;
-  text-align: center;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 13px;
-  pointer-events: none;
-  background: radial-gradient(420px 180px at 50% 50%, rgba(5, 6, 10, 0.72), rgba(5, 6, 10, 0.1));
-  transition: opacity 240ms ease;
-}
-
-.stage-note.is-hidden {
-  opacity: 0;
-}
-
 .stage.is-dragover {
   border-color: rgba(34, 211, 238, 0.65);
   box-shadow:
@@ -259,12 +229,7 @@ body {
     0 18px 50px rgba(0, 0, 0, 0.4),
     0 1px 0 rgba(255, 255, 255, 0.03) inset;
 }
-
-.pipe-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 18px;
+.pipeline > .panel-title {
   margin-bottom: 14px;
 }
 
@@ -727,8 +692,7 @@ body.low-quality .route-pulse.pulse-2 {
 
 @media (prefers-reduced-motion: reduce) {
   .button,
-  .choice,
-  .stage-note {
+  .choice {
     transition: none;
   }
 

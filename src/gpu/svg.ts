@@ -15,6 +15,8 @@
  * because every frame rebuilds the path data.
  */
 
+import { FRAME_SAMPLES } from '../../shared/audio.ts';
+import { createColumnEnvelope } from './envelope.ts';
 import type { BackendFrame, CanvasSize, RenderBackend } from './visualizer.ts';
 
 export interface SvgOptions {
@@ -39,8 +41,8 @@ export function createSvgBackend(
   let width = 1;
   let height = 1;
   let destroyed = false;
-  const columns = Math.max(8, Math.min(2048, Math.round(options.columns)));
-  const samplesPerColumn = 2048 / columns;
+  const envelope = createColumnEnvelope(Math.max(8, Math.min(FRAME_SAMPLES, Math.round(options.columns))));
+  const columns = envelope.columns;
 
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('class', `stage-svg${options.glow ? '' : ' no-glow'}`);
@@ -72,35 +74,6 @@ export function createSvgBackend(
 
     stage.append(svg);
 
-    const amplitudes = new Float32Array(columns);
-    const smoothed = new Float32Array(columns);
-
-    /** 2048 samples → symmetric half-amplitudes per column, plus one smoothing pass. */
-    function computeAmps(samples: Float32Array): void {
-      for (let column = 0; column < columns; column++) {
-        const base = column * samplesPerColumn;
-        let minimum = 1;
-        let maximum = -1;
-        let sum = 0;
-        for (let i = 0; i < samplesPerColumn; i++) {
-          const value = samples[base + i];
-          if (value < minimum) minimum = value;
-          if (value > maximum) maximum = value;
-          sum += value;
-        }
-        const centre = sum / samplesPerColumn;
-        const left = Math.abs(maximum - centre);
-        const right = Math.abs(centre - minimum);
-        amplitudes[column] = left > right ? left : right;
-      }
-      for (let column = 0; column < columns; column++) {
-        const left = amplitudes[column > 0 ? column - 1 : column];
-        const right = amplitudes[column < columns - 1 ? column + 1 : column];
-        smoothed[column] = (left + amplitudes[column] * 2 + right) * 0.25;
-      }
-      amplitudes.set(smoothed);
-    }
-
     function resize(size: CanvasSize): void {
       if (destroyed) return;
       width = Math.max(1, size.width);
@@ -109,19 +82,13 @@ export function createSvgBackend(
     }
 
     function render(frame: BackendFrame): void {
-      if (destroyed || frame.samples.length < columns * samplesPerColumn) return;
-      computeAmps(frame.samples);
+      if (destroyed || frame.samples.length < FRAME_SAMPLES) return;
+      envelope.compute(frame.samples);
       const midY = height / 2;
       const xAt = (column: number): number => ((column + 0.5) / columns) * width;
-      // Normalise this backend's own columns so the drawn envelope lands on the
-      // same target height no matter how coarsely it samples the frame.
-      let ampPeak = 0;
-      for (let column = 0; column < columns; column++) {
-        if (amplitudes[column] > ampPeak) ampPeak = amplitudes[column];
-      }
-      const ampScale = ampPeak > 1e-5 ? 0.42 / ampPeak : 0;
+      const { ampScale } = envelope;
       const halfAt = (column: number): number =>
-        Math.min(height * 0.49, Math.max(1.5, (amplitudes[column] * ampScale + 0.008) * height));
+        Math.min(height * 0.49, Math.max(1.5, (envelope.amplitudes[column] * ampScale + 0.008) * height));
 
       let top = '';
       let bottom = '';
