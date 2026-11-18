@@ -9,14 +9,21 @@
  * hides the stage canvas while this backend owns an `<svg>` sibling.
  *
  * Deliberately simple for a first pass: one filled envelope path, one rim path,
- * one gradient. It is a placeholder for whichever third rendering method the
- * project settles on; the point is that swapping it in changes only `src/gpu/`.
+ * one gradient on the shared cached backdrop. It is a placeholder for whichever
+ * third rendering method the project settles on; the point is that swapping it
+ * in changes only `src/gpu/`. The column count is much lower than Canvas2D's
+ * because every frame rebuilds the path data.
  */
 
 import type { BackendFrame, CanvasSize, RenderBackend } from './visualizer.ts';
 
-const SAMPLES_PER_COLUMN = 8;
-const COLUMN_COUNT = 256;
+export interface SvgOptions {
+  /** Envelope columns; 2048 must divide evenly by this. */
+  columns: number;
+  /** Whether to keep the drop-shadow glow on the envelope. */
+  glow: boolean;
+}
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const GRADIENT_STOPS: ReadonlyArray<readonly [string, string]> = [
   ['0', '#7c4dff'],
@@ -27,13 +34,16 @@ const GRADIENT_STOPS: ReadonlyArray<readonly [string, string]> = [
 export function createSvgBackend(
   stage: HTMLElement,
   report: (message: string) => void,
+  options: SvgOptions = { columns: 64, glow: true },
 ): RenderBackend | null {
   let width = 1;
   let height = 1;
   let destroyed = false;
+  const columns = Math.max(8, Math.min(2048, Math.round(options.columns)));
+  const samplesPerColumn = 2048 / columns;
 
   const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('class', 'stage-svg');
+  svg.setAttribute('class', `stage-svg${options.glow ? '' : ' no-glow'}`);
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('preserveAspectRatio', 'none');
 
@@ -54,45 +64,38 @@ export function createSvgBackend(
     defs.append(gradient);
     svg.append(defs);
 
-    // The canvas backends paint a measurement grid; draw the same guides as two
-    // static paths so the third backend does not look like a different app.
-    const grid = document.createElementNS(SVG_NS, 'path');
-    grid.setAttribute('class', 'wave-grid');
-    const centre = document.createElementNS(SVG_NS, 'path');
-    centre.setAttribute('class', 'wave-centre');
-
     const fill = document.createElementNS(SVG_NS, 'path');
     fill.setAttribute('class', 'wave-fill');
     const rim = document.createElementNS(SVG_NS, 'path');
     rim.setAttribute('class', 'wave-rim');
-    svg.append(grid, centre, fill, rim);
+    svg.append(fill, rim);
 
     stage.append(svg);
 
-    const amplitudes = new Float32Array(COLUMN_COUNT);
-    const smoothed = new Float32Array(COLUMN_COUNT);
+    const amplitudes = new Float32Array(columns);
+    const smoothed = new Float32Array(columns);
 
-    /** 2048 samples → 256 symmetric half-amplitudes, plus one smoothing pass. */
+    /** 2048 samples → symmetric half-amplitudes per column, plus one smoothing pass. */
     function computeAmps(samples: Float32Array): void {
-      for (let column = 0; column < COLUMN_COUNT; column++) {
-        const base = column * SAMPLES_PER_COLUMN;
+      for (let column = 0; column < columns; column++) {
+        const base = column * samplesPerColumn;
         let minimum = 1;
         let maximum = -1;
         let sum = 0;
-        for (let i = 0; i < SAMPLES_PER_COLUMN; i++) {
+        for (let i = 0; i < samplesPerColumn; i++) {
           const value = samples[base + i];
           if (value < minimum) minimum = value;
           if (value > maximum) maximum = value;
           sum += value;
         }
-        const centre = sum / SAMPLES_PER_COLUMN;
+        const centre = sum / samplesPerColumn;
         const left = Math.abs(maximum - centre);
         const right = Math.abs(centre - minimum);
         amplitudes[column] = left > right ? left : right;
       }
-      for (let column = 0; column < COLUMN_COUNT; column++) {
+      for (let column = 0; column < columns; column++) {
         const left = amplitudes[column > 0 ? column - 1 : column];
-        const right = amplitudes[column < COLUMN_COUNT - 1 ? column + 1 : column];
+        const right = amplitudes[column < columns - 1 ? column + 1 : column];
         smoothed[column] = (left + amplitudes[column] * 2 + right) * 0.25;
       }
       amplitudes.set(smoothed);
@@ -103,33 +106,32 @@ export function createSvgBackend(
       width = Math.max(1, size.width);
       height = Math.max(1, size.height);
       svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-
-      let verticals = '';
-      for (let i = 1; i < 16; i++) {
-        const x = (width * i) / 16;
-        verticals += `M ${x.toFixed(2)} 0 L ${x.toFixed(2)} ${height.toFixed(2)} `;
-      }
-      grid.setAttribute('d', verticals.trim());
-      centre.setAttribute('d', `M 0 ${(height / 2).toFixed(2)} L ${width.toFixed(2)} ${(height / 2).toFixed(2)}`);
     }
 
     function render(frame: BackendFrame): void {
-      if (destroyed || frame.samples.length < COLUMN_COUNT * SAMPLES_PER_COLUMN) return;
+      if (destroyed || frame.samples.length < columns * samplesPerColumn) return;
       computeAmps(frame.samples);
       const midY = height / 2;
-      const xAt = (column: number): number => ((column + 0.5) / COLUMN_COUNT) * width;
+      const xAt = (column: number): number => ((column + 0.5) / columns) * width;
+      // Normalise this backend's own columns so the drawn envelope lands on the
+      // same target height no matter how coarsely it samples the frame.
+      let ampPeak = 0;
+      for (let column = 0; column < columns; column++) {
+        if (amplitudes[column] > ampPeak) ampPeak = amplitudes[column];
+      }
+      const ampScale = ampPeak > 1e-5 ? 0.42 / ampPeak : 0;
       const halfAt = (column: number): number =>
-        Math.min(height * 0.49, Math.max(1.5, (amplitudes[column] * frame.ampScale + 0.008) * height));
+        Math.min(height * 0.49, Math.max(1.5, (amplitudes[column] * ampScale + 0.008) * height));
 
       let top = '';
       let bottom = '';
-      for (let column = 0; column < COLUMN_COUNT; column++) {
-        const x = xAt(column).toFixed(2);
-        const y = (midY - halfAt(column)).toFixed(2);
+      for (let column = 0; column < columns; column++) {
+        const x = xAt(column).toFixed(1);
+        const y = (midY - halfAt(column)).toFixed(1);
         top += `${column === 0 ? 'M' : 'L'} ${x} ${y} `;
       }
-      for (let column = COLUMN_COUNT - 1; column >= 0; column--) {
-        bottom += `L ${xAt(column).toFixed(2)} ${(midY + halfAt(column)).toFixed(2)} `;
+      for (let column = columns - 1; column >= 0; column--) {
+        bottom += `L ${xAt(column).toFixed(1)} ${(midY + halfAt(column)).toFixed(1)} `;
       }
       fill.setAttribute('d', `${top}${bottom}Z`);
       rim.setAttribute('d', top.trim());

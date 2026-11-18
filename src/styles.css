@@ -126,12 +126,33 @@ body {
     0 0 90px rgba(96, 74, 220, 0.08);
 }
 
-/* The canvas fills its panel; visualizer.ts keeps the backing store in sync. */
-.stage canvas {
+/* The cached backdrop (gradient, halo, grid, centre line) painted once per
+   resize; Canvas2D and SVG draw on top of it. */
+.stage-backdrop {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   background: #04060b;
+  pointer-events: none;
+}
+
+/* The drawing canvas is transparent so the shared backdrop shows through;
+   visualizer.ts keeps the backing store in sync. */
+.stage #stage {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.stage canvas:not(#stage) {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 /* SVG renderer output: the third backend paints retained-mode DOM instead of a
@@ -139,6 +160,7 @@ body {
 .stage-svg {
   position: absolute;
   inset: 0;
+  z-index: 2;
   display: block;
   width: 100%;
   height: 100%;
@@ -157,21 +179,14 @@ body {
   stroke-width: 1.2;
 }
 
-.stage-svg .wave-grid {
-  fill: none;
-  stroke: rgba(96, 120, 190, 0.1);
-  stroke-width: 1;
-}
-
-.stage-svg .wave-centre {
-  fill: none;
-  stroke: rgba(110, 140, 230, 0.22);
-  stroke-width: 1;
+.stage-svg.no-glow .wave-fill {
+  filter: none;
 }
 
 .stage-note {
   position: absolute;
   inset: 0;
+  z-index: 3;
   display: grid;
   place-items: center;
   margin: 0;
@@ -200,7 +215,7 @@ body {
   content: "drop an audio file to play it";
   position: absolute;
   inset: 12px;
-  z-index: 2;
+  z-index: 4;
   display: grid;
   place-items: center;
   border: 1px dashed rgba(34, 211, 238, 0.55);
@@ -323,6 +338,8 @@ body {
 
 .choice {
   appearance: none;
+  position: relative;
+  isolation: isolate;
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -379,15 +396,30 @@ body {
 
 .choice[aria-pressed="true"] {
   color: #eafdff;
-  border-color: rgb(var(--accent) / calc(0.45 + var(--level) * 0.33));
+  border-color: rgb(var(--accent) / 0.6);
   background: linear-gradient(
     180deg,
     rgb(var(--accent) / 0.16),
     rgb(var(--accent) / 0.07)
   );
+  box-shadow: 0 0 0 1px rgb(var(--accent) / 0.14) inset;
+}
+
+/* The large glow is painted once here and only its opacity follows the level;
+   changing opacity on a promoted layer is compositor work, whereas animating
+   box-shadow repaints the chip every frame. */
+.choice[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  z-index: -1;
+  border-radius: 11px;
+  pointer-events: none;
   box-shadow:
-    0 0 0 1px rgb(var(--accent) / calc(0.1 + var(--level) * 0.14)) inset,
-    0 6px 20px rgb(var(--accent) / calc(0.09 + var(--level) * 0.3));
+    0 0 22px 4px rgb(var(--accent) / 0.35),
+    0 6px 24px 2px rgb(var(--accent) / 0.25);
+  opacity: calc(0.35 + var(--level) * 0.65);
+  will-change: opacity;
 }
 
 .choice[aria-pressed="true"]::before {
@@ -441,6 +473,16 @@ body {
   stroke-dasharray: 0.1 52;
   opacity: calc(0.72 + var(--level) * 0.28);
   animation: route-flow 2.4s linear infinite;
+  /* Paused unless the render loop is running (playing + on screen). */
+  animation-play-state: paused;
+}
+
+body.is-animating .route-pulse {
+  animation-play-state: running;
+}
+
+body.low-quality .route-pulse.pulse-2 {
+  display: none;
 }
 
 .route-pulse.pulse-2 {

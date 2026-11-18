@@ -4,17 +4,22 @@
  *
  * The CSS uses it only for paint-only accents: the selected chips' LED dot and
  * glow, and the trace glow and pulses. Nothing here touches layout, and there
- * is at most one style write per animation frame, driven from main.ts's existing
- * frame loop — no extra timers, no extra measurements.
+ * is at most one style write per animation frame (30 Hz on the mobile tier),
+ * driven from main.ts's existing frame loop — no extra timers, no extra
+ * measurements.
  *
  * Attack is quick enough to catch transients; release is slow enough that the
  * panel breathes instead of flickering. Motion-sensitive users get a static
  * panel: with `prefers-reduced-motion: reduce` the property is pinned to 0.
  */
 
+import { quality } from '../quality.ts';
+
 export interface PipelineAccent {
   /** `rms` and `peak` are the raw (un-normalised) frame values from main.ts. */
   update(rms: number, peak: number, now: number): void;
+  /** Drop the accent to zero immediately (pause, off-screen). */
+  reset(): void;
 }
 
 /** Asymmetric smoothing time constants (ms). */
@@ -28,6 +33,7 @@ export function createPipelineAccent(root: ParentNode): PipelineAccent {
   let level = 0;
   let lastAt = 0;
   let lastWritten = '0';
+  let lastWrittenAt = 0;
 
   motionQuery?.addEventListener?.('change', (event) => {
     reducedMotion = event.matches;
@@ -59,7 +65,18 @@ export function createPipelineAccent(root: ParentNode): PipelineAccent {
       level += (target - level) * (1 - Math.exp(-dt / tau));
       // Snap the tail to zero so a paused page settles exactly at rest.
       if (target === 0 && level < 0.004) level = 0;
+
+      // On the mobile tier the CSS var is written at half rate; the smoothing
+      // above still runs every frame so the glow does not step.
+      if (now - lastWrittenAt < (1000 / quality.accentHz) * 0.85) return;
+      lastWrittenAt = now;
       write(level);
+    },
+    reset(): void {
+      level = 0;
+      lastAt = 0;
+      lastWrittenAt = 0;
+      write(0);
     },
   };
 }

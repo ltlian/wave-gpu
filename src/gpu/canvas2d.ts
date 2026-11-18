@@ -1,19 +1,22 @@
 /**
  * Canvas2D fallback: the same picture as the WebGPU pass, drawn with paths.
  *
- * Used when WebGPU is unavailable (no adapter, blocked, shader failure, ...).
- * It buckets the 2048 samples into the same 256 columns × 8 samples summary the
- * GPU compute shader would produce, then fills a symmetric violet→cyan envelope
- * with a gradient and a soft `shadowBlur` glow. 256 columns and a handful of
- * gradients per frame is comfortably a 60 fps workload for Canvas2D.
+ * It buckets the 2048 samples into the requested number of columns (256 on the
+ * desktop tier, 128 on the mobile tier), then fills a symmetric violet→cyan
+ * envelope with a gradient. The stage backdrop and grid come from the shared
+ * cached layer (`stage-backdrop.ts`), so a frame only clears the canvas and
+ * draws the envelope; the soft `shadowBlur` glow is skipped on the low tier.
  */
 
 import { FRAME_SAMPLES } from '../../shared/audio.ts';
 import type { BackendFrame, CanvasSize, RenderBackend } from './visualizer.ts';
 
-/** Each column summarises this many samples (2048 / 8 = 256 columns). */
-const SAMPLES_PER_COLUMN = 8;
-const COLUMN_COUNT = FRAME_SAMPLES / SAMPLES_PER_COLUMN;
+export interface Canvas2dOptions {
+  /** Envelope columns; 2048 must divide evenly by this. */
+  columns: number;
+  /** Whether to spend the frame on the `shadowBlur` glow. */
+  glow: boolean;
+}
 
 type Rgb = readonly [number, number, number];
 
@@ -36,6 +39,7 @@ function rgba(color: Rgb, alpha: number): string {
 export function createCanvas2dBackend(
   canvas: HTMLCanvasElement,
   report: (message: string) => void,
+  options: Canvas2dOptions = { columns: 256, glow: true },
 ): RenderBackend | null {
   let context: CanvasRenderingContext2D | null = null;
   try {
@@ -51,9 +55,11 @@ export function createCanvas2dBackend(
     return null;
   }
   const ctx = context;
+  const columns = Math.max(16, Math.min(FRAME_SAMPLES, Math.round(options.columns)));
+  const samplesPerColumn = FRAME_SAMPLES / columns;
 
-  const amplitudes = new Float32Array(COLUMN_COUNT);
-  const smoothed = new Float32Array(COLUMN_COUNT);
+  const amplitudes = new Float32Array(columns);
+  const smoothed = new Float32Array(columns);
   let dpr = 1;
   let cssWidth = 1;
   let cssHeight = 1;
@@ -70,28 +76,28 @@ export function createCanvas2dBackend(
     if (canvas.height !== height) canvas.height = height;
   }
 
-  /** 2048 samples → 256 symmetric half-amplitudes, plus one smoothing pass. */
+  /** 2048 samples → symmetric half-amplitudes per column, plus one smoothing pass. */
   function computeAmps(samples: Float32Array): void {
-    for (let column = 0; column < COLUMN_COUNT; column++) {
-      const base = column * SAMPLES_PER_COLUMN;
+    for (let column = 0; column < columns; column++) {
+      const base = column * samplesPerColumn;
       let minimum = 1;
       let maximum = -1;
       let sum = 0;
-      for (let i = 0; i < SAMPLES_PER_COLUMN; i++) {
+      for (let i = 0; i < samplesPerColumn; i++) {
         const value = samples[base + i];
         if (value < minimum) minimum = value;
         if (value > maximum) maximum = value;
         sum += value;
       }
-      const center = sum / SAMPLES_PER_COLUMN;
+      const center = sum / samplesPerColumn;
       const left = Math.abs(maximum - center);
       const right = Math.abs(center - minimum);
       amplitudes[column] = left > right ? left : right;
     }
     // One neighbour pass keeps column edges from looking like a picket fence.
-    for (let column = 0; column < COLUMN_COUNT; column++) {
+    for (let column = 0; column < columns; column++) {
       const left = amplitudes[column > 0 ? column - 1 : column];
-      const right = amplitudes[column < COLUMN_COUNT - 1 ? column + 1 : column];
+      const right = amplitudes[column < columns - 1 ? column + 1 : column];
       smoothed[column] = (left + amplitudes[column] * 2 + right) * 0.25;
     }
     amplitudes.set(smoothed);
@@ -110,48 +116,9 @@ export function createCanvas2dBackend(
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // ---- backdrop + soft halo ---------------------------------------------
-    const backdrop = ctx.createLinearGradient(0, 0, 0, height);
-    backdrop.addColorStop(0, '#05070d');
-    backdrop.addColorStop(0.55, '#0a0e1b');
-    backdrop.addColorStop(1, '#04060b');
-    ctx.fillStyle = backdrop;
-    ctx.fillRect(0, 0, width, height);
-
-    const halo = ctx.createRadialGradient(
-      width * 0.5,
-      height * 0.5,
-      Math.min(width, height) * 0.05,
-      width * 0.5,
-      height * 0.5,
-      Math.max(width, height) * 0.75,
-    );
-    halo.addColorStop(0, 'rgba(70, 96, 190, 0.12)');
-    halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = halo;
-    ctx.fillRect(0, 0, width, height);
-
-    // ---- grid + centre line ----------------------------------------------
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(96, 120, 190, 0.10)';
-    ctx.beginPath();
-    for (let i = 1; i < 16; i++) {
-      const x = Math.round((width * i) / 16) + 0.5;
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, height);
-    }
-    for (let i = 1; i < 8; i++) {
-      const y = Math.round((height * i) / 8) + 0.5;
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-    }
-    ctx.stroke();
-    const centreY = Math.round(midY) + 0.5;
-    ctx.strokeStyle = 'rgba(110, 140, 230, 0.22)';
-    ctx.beginPath();
-    ctx.moveTo(0, centreY);
-    ctx.lineTo(width, centreY);
-    ctx.stroke();
+    // The backdrop, halo, grid and centre line live in the shared cached canvas
+    // underneath; only clear this frame and draw the envelope on top of it.
+    ctx.clearRect(0, 0, width, height);
 
     // ---- palette driven by the raw display level --------------------------
     computeAmps(frame.samples);
@@ -161,9 +128,14 @@ export function createCanvas2dBackend(
     const rimAlpha = Math.min(1, (0.68 + energy * 0.32) * breathe);
     const rimColor = mix(WHITE, VIOLET, 0.32);
 
-    // Display-normalised samples: amplitude 1 is full scale (see visualizer.ts).
-    const ampScale = frame.ampScale;
-    const xAt = (column: number): number => ((column + 0.5) / COLUMN_COUNT) * width;
+    // Normalise this backend's own columns so the drawn envelope lands on the
+    // same target height no matter how many samples a column summarises.
+    let ampPeak = 0;
+    for (let column = 0; column < columns; column++) {
+      if (amplitudes[column] > ampPeak) ampPeak = amplitudes[column];
+    }
+    const ampScale = ampPeak > 1e-5 ? 0.42 / ampPeak : 0;
+    const xAt = (column: number): number => ((column + 0.5) / columns) * width;
     const halfAt = (column: number): number =>
       Math.min(height * 0.49, Math.max(1.5, (amplitudes[column] * ampScale + 0.008) * height));
 
@@ -173,16 +145,18 @@ export function createCanvas2dBackend(
 
     // ---- glowing symmetric envelope ---------------------------------------
     ctx.save();
-    ctx.shadowColor = 'rgba(120, 180, 255, 0.55)';
-    ctx.shadowBlur = 18;
+    if (options.glow) {
+      ctx.shadowColor = 'rgba(120, 180, 255, 0.55)';
+      ctx.shadowBlur = 18;
+    }
     ctx.fillStyle = fill;
     ctx.beginPath();
-    for (let column = 0; column < COLUMN_COUNT; column++) {
+    for (let column = 0; column < columns; column++) {
       const y = midY - halfAt(column);
       if (column === 0) ctx.moveTo(xAt(column), y);
       else ctx.lineTo(xAt(column), y);
     }
-    for (let column = COLUMN_COUNT - 1; column >= 0; column--) {
+    for (let column = columns - 1; column >= 0; column--) {
       ctx.lineTo(xAt(column), midY + halfAt(column));
     }
     ctx.closePath();
@@ -196,7 +170,7 @@ export function createCanvas2dBackend(
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = rim;
     ctx.beginPath();
-    for (let column = 0; column < COLUMN_COUNT; column++) {
+    for (let column = 0; column < columns; column++) {
       const y = midY - halfAt(column);
       if (column === 0) ctx.moveTo(xAt(column), y);
       else ctx.lineTo(xAt(column), y);
@@ -205,7 +179,7 @@ export function createCanvas2dBackend(
 
     ctx.globalAlpha = 0.5;
     ctx.beginPath();
-    for (let column = 0; column < COLUMN_COUNT; column++) {
+    for (let column = 0; column < columns; column++) {
       const y = midY + halfAt(column);
       if (column === 0) ctx.moveTo(xAt(column), y);
       else ctx.lineTo(xAt(column), y);

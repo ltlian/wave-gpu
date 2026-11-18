@@ -57,19 +57,23 @@ reading the selection back from the buttons.
    resources. Sources connect to `masterGain`; switching stops the previous source first.
 3. **Both taps sit on `masterGain`, always.** The analyser branch is passive. The worklet tap
    reads through a silent `GainNode(0)` → `destination` so the graph keeps pulling it.
-4. **Each animation frame**, `main.ts` calls `engine.readFrame(buffer)` (active tap), computes raw
-   RMS/peak, and calls `visualizer.render(buffer, meta)`. If no audio is flowing, an idle preview
-   supplies a synthetic frame — the canvas never goes black.
+4. **While audio plays and the stage is on screen**, `main.ts` runs an animation frame loop that
+   calls `engine.readFrame(buffer)` (active tap), computes raw RMS/peak, and calls
+   `visualizer.render(buffer, meta)`. When paused, or when the stage is scrolled out of view, the
+   loop stops; a single static idle frame is drawn at startup, on resize and after a paused backend
+   switch so the canvas is never blank.
 5. **The visualizer** applies display-only auto-gain (to a copy), then hands the frame to the
    selected backend. WebGPU uploads 2048 floats to a storage buffer, runs a compute pass that
    reduces them to 256 columns, and draws a fullscreen triangle with a fragment shader; Canvas2D
-   buckets the same samples into 256 columns and fills a gradient envelope with paths; SVG updates
-   two retained-mode paths on a sibling `<svg>` element.
+   buckets the samples into columns and fills a gradient envelope with paths; SVG updates two
+   retained-mode paths on a sibling `<svg>` element. The dark backdrop, halo, grid and centre line
+   are painted once per resize into a cached canvas under both of those backends; WebGPU keeps its
+   own in-shader backdrop because its canvas is opaque.
 6. **The UI** is refreshed at ~10 Hz from the same engine/visualizer state. Errors from any layer
    go to the error strip (and the `window.__wave` probe). The pipeline panel is the exception: its
-   accents are driven from the 60 fps loop, which writes one CSS custom property (`--level`) that
-   the selected chips and the trace read for glow, so the panel follows the audio rather than the
-   10 Hz readout.
+   accents are driven from the render loop, which writes one CSS custom property (`--level`) that
+   the selected chips and the trace read for glow (60 Hz desktop, 30 Hz mobile), so the panel
+   follows the audio rather than the 10 Hz readout.
 7. **The renderer column** switches the visualizer between WebGPU, Canvas2D and SVG while it runs.
    Only the drawing changes: the audio graph, tap selection and readout are untouched. Canvas
    backends share one `<canvas>`; because a canvas cannot change context type once it has handed one
@@ -177,6 +181,25 @@ await ctx.audioWorklet.addModule(workletUrl);
 (A plain `?url` import of a `.ts` file gets inlined as a data: URL containing raw TypeScript in
 the production build — audio worklets cannot load that.)
 
+## Performance tiers
+
+`src/quality.ts` chooses one of two tiers: `low` on coarse pointers or devices reporting four or
+fewer cores, `high` otherwise. `?quality=low` / `?quality=high` overrides the detection so the
+tradeoff can be compared on one device.
+
+| | high | low |
+| --- | --- | --- |
+| render loop | 60 fps | 30 fps (with a tolerance so 60 Hz vsync cannot silently drop it to 20) |
+| backing store | DPR 2 | DPR 1 |
+| Canvas2D columns / glow | 256 / `shadowBlur` | 128 / none |
+| SVG columns / glow | 64 / drop-shadow | 32 / none |
+| pipeline accents | 60 Hz | 30 Hz, second trace pulse hidden |
+
+The loop does no work while paused or while the stage is off screen; the stage also has a cached
+backdrop so a frame only clears the canvas and draws the waveform. The mobile tier is intentionally
+a visible quality drop — this is a worked example, not a visual showcase.
+
+
 ## File map
 
 | Path | What it is |
@@ -188,6 +211,8 @@ the production build — audio worklets cannot load that.)
 | `src/audio/taps/*.ts` | `AnalyserNode` tap and `AudioWorklet` tap |
 | `src/audio/worklet/capture-worklet.ts` | audio-thread processor, SAB ring, stats |
 | `src/audio/pcm.ts` | pure interleaved-f32 chunk helpers (unit-tested) |
+| `src/quality.ts` | high/low tier selection and the numbers each tier uses |
+| `src/gpu/stage-backdrop.ts` | cached backdrop, halo, grid and centre line for Canvas2D/SVG |
 | `src/gpu/visualizer.ts` | backend selection + runtime switching, errors, display gain |
 | `src/gpu/webgpu.ts`, `shaders.ts` | compute + render pipeline, WGSL |
 | `src/gpu/canvas2d.ts` | Canvas2D renderer (fallback / selectable) |

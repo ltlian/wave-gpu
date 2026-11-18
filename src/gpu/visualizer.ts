@@ -22,8 +22,10 @@ import { FRAME_SAMPLES } from '../../shared/audio.ts';
 import type { FrameMeta, RendererId, Visualizer } from '../types.ts';
 import { createCanvas2dBackend } from './canvas2d.ts';
 import { createDisplayGain } from './display-gain.ts';
+import { createStageBackdrop } from './stage-backdrop.ts';
 import { createSvgBackend } from './svg.ts';
 import { createWebGpuBackend } from './webgpu.ts';
+import { quality } from '../quality.ts';
 
 /** CSS-pixel size of the stage plus the device-pixel-ratio to render at. */
 export interface CanvasSize {
@@ -52,8 +54,6 @@ export interface RenderBackend {
   destroy(): void;
 }
 
-/** Never upscale beyond 2x: the stage canvas is already large. */
-const MAX_DPR = 2;
 /** Fewer than this many stored messages keeps the strip readable. */
 const MAX_ERRORS = 16;
 
@@ -102,8 +102,9 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
     errors.push(text);
   };
 
-  /** The stage panel; the SVG backend mounts its `<svg>` here. */
+  /** The stage panel; the cached backdrop and the SVG backend mount here. */
   const stage = canvas.parentElement;
+  const backdrop = stage !== null ? createStageBackdrop(stage) : null;
 
   let target = canvas;
   let renderer: RenderBackend | null = null;
@@ -156,7 +157,10 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
       report('The SVG renderer needs a stage container to mount into.');
       return false;
     }
-    const next = createSvgBackend(stage, report);
+    const next = createSvgBackend(stage, report, {
+      columns: quality.svgColumns,
+      glow: quality.svgGlow,
+    });
     if (!next) return false;
     renderer = next;
     kind = 'svg';
@@ -177,14 +181,20 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
     // succeeds. Reporting the first attempt's message in that case would be
     // misleading.
     const attemptMessages: string[] = [];
-    const first = createCanvas2dBackend(target, (message) => attemptMessages.push(message));
+    const first = createCanvas2dBackend(target, (message) => attemptMessages.push(message), {
+      columns: quality.canvasColumns,
+      glow: quality.canvasGlow,
+    });
     if (first) {
       renderer = first;
       kind = '2d';
       return true;
     }
     if (replaceCanvas()) {
-      const second = createCanvas2dBackend(target, report);
+      const second = createCanvas2dBackend(target, report, {
+        columns: quality.canvasColumns,
+        glow: quality.canvasGlow,
+      });
       if (second) {
         renderer = second;
         kind = '2d';
@@ -253,15 +263,17 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
   }
 
   function measure(): CanvasSize {
-    const dpr = Math.min(globalThis.devicePixelRatio || 1, MAX_DPR);
+    const dpr = Math.min(globalThis.devicePixelRatio || 1, quality.maxDpr);
     const rect = target.getBoundingClientRect();
     return { width: Math.max(1, rect.width), height: Math.max(1, rect.height), dpr };
   }
 
   function applySize(): void {
+    const size = measure();
+    backdrop?.resize(size);
     if (destroyed || renderer === null) return;
     try {
-      renderer.resize(measure());
+      renderer.resize(size);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       report(`Visualizer resize failed: ${message}`);
@@ -378,6 +390,7 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
     }
     renderer = null;
     target.style.visibility = '';
+    backdrop?.destroy();
   }
 
   return {

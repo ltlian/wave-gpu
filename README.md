@@ -26,6 +26,9 @@ The same frame, drawn by the SVG backend instead of WebGPU:
   and a retained-mode SVG/DOM layer — switchable while audio plays, with a display-only auto-gain.
 - A pipeline panel: one column per layer, with the selected route traced between them and into the
   waveform frame.
+- A mobile quality tier, selected automatically for coarse pointers / low core counts: 30 fps,
+  1x backing store, fewer canvas/SVG columns and no blur. Force it on any device with
+  `?quality=low` (or `?quality=high` to compare).
 - Sound-reactive accents: the selected chips' LED dots, their glow and the trace follow the live
   output level (paint-only, one frame-loop write; static under `prefers-reduced-motion`).
 - Live readout of the context, both taps, the PCM stream and the renderer, plus a `window.__wave` probe.
@@ -74,7 +77,8 @@ isolation headers come from [public/_headers](public/_headers).
 ```
 src/audio/sources/      the four entry points
 src/audio/taps/         the two read paths
-src/gpu/                three renderers: WebGPU, Canvas2D, SVG (switchable at runtime)
+src/gpu/                three renderers (WebGPU, Canvas2D, SVG) + cached stage backdrop
+src/quality.ts          high/low performance tier selection
 server/                 dev-server audio endpoints (synth, PCM stream)
 scripts/build-audio.ts  build-time audio assets for the deployed site
 shared/audio.ts         constants shared by the browser app and the server
