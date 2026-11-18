@@ -1,9 +1,15 @@
 /**
  * Backend selection, runtime switching and the display-side frame preparation.
  *
+ * Three backends share one `RenderBackend` contract: a WebGPU compute/render
+ * pipeline, an immediate-mode Canvas2D drawing, and a retained-mode SVG layer.
+ * The SVG backend mounts a sibling `<svg>` and hides the canvas instead of using
+ * it, but it still receives the same normalised frame, so nothing above this
+ * module needs to know which one is drawing.
+ *
  * `createVisualizer(canvas)` tries WebGPU first; if any part of that fails it
  * records a human-readable reason and builds the Canvas2D renderer instead, so
- * the app always has something to draw into. Both backends stay available to
+ * the app always has something to draw into. Every backend stays available to
  * the UI afterwards (`setBackend()`), which is what the renderer control uses
  * to compare them on a machine that supports both. Everything here is
  * display-only: the audio tap owns the samples and `src/main.ts` owns the raw
@@ -16,6 +22,7 @@ import { FRAME_SAMPLES } from '../../shared/audio.ts';
 import type { FrameMeta, RendererId, Visualizer } from '../types.ts';
 import { createCanvas2dBackend } from './canvas2d.ts';
 import { createDisplayGain } from './display-gain.ts';
+import { createSvgBackend } from './svg.ts';
 import { createWebGpuBackend } from './webgpu.ts';
 
 /** CSS-pixel size of the stage plus the device-pixel-ratio to render at. */
@@ -25,7 +32,7 @@ export interface CanvasSize {
   dpr: number;
 }
 
-/** Per-frame input shared by both backends (samples are the normalised copy). */
+/** Per-frame input shared by every backend (samples are the normalised copy). */
 export interface BackendFrame {
   samples: Float32Array;
   /** Seconds since load; only used for slow cosmetic breathing. */
@@ -95,6 +102,9 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
     errors.push(text);
   };
 
+  /** The stage panel; the SVG backend mounts its `<svg>` here. */
+  const stage = canvas.parentElement;
+
   let target = canvas;
   let renderer: RenderBackend | null = null;
   let kind: RendererId | null = null;
@@ -134,6 +144,24 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
     webgpuAvailable = false;
     webgpuUnavailableReason = errors[reasonStart] ?? 'WebGPU is not available in this browser.';
     return false;
+  }
+
+  /**
+   * Mount the SVG backend on an `<svg>` sibling of the stage canvas. The canvas
+   * is only hidden, never removed or resized, so `measure()` and the existing
+   * ResizeObserver keep working while the SVG layer is active.
+   */
+  function mountSvg(): boolean {
+    if (!stage) {
+      report('The SVG renderer needs a stage container to mount into.');
+      return false;
+    }
+    const next = createSvgBackend(stage, report);
+    if (!next) return false;
+    renderer = next;
+    kind = 'svg';
+    target.style.visibility = 'hidden';
+    return true;
   }
 
   /**
@@ -262,9 +290,33 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
   async function setBackend(next: RendererId): Promise<void> {
     if (destroyed || next === kind) return;
     if (next === 'webgpu' && !webgpuAvailable) return;
+
     renderer?.destroy();
     renderer = null;
     kind = null;
+
+    if (next === 'svg') {
+      if (mountSvg()) {
+        // Unlike the canvas backends there is no attachToCanvas() here: the
+        // canvas keeps its size while hidden, so the observer still tracks the
+        // panel, but the new SVG layer needs its initial viewBox.
+        applySize();
+        return;
+      }
+      // The SVG layer could not be created: keep the page drawing on the canvas
+      // rather than blanking the stage.
+      target.style.visibility = '';
+      if (mountCanvas2d(true)) {
+        attachToCanvas();
+        return;
+      }
+      report('No rendering backend is available — the stage will stay blank.');
+      return;
+    }
+
+    // Any canvas backend needs a visible, context-free canvas: it may have been
+    // hidden for the SVG layer, and a canvas cannot hand out a second context.
+    target.style.visibility = '';
     replaceCanvas();
     if (next === 'webgpu') {
       if (await mountWebGpu()) {
@@ -325,6 +377,7 @@ export async function createVisualizer(canvas: HTMLCanvasElement): Promise<Visua
       // The backend is being torn down; nothing left to report.
     }
     renderer = null;
+    target.style.visibility = '';
   }
 
   return {

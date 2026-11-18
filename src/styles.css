@@ -12,6 +12,8 @@
   --violet: #8b5cf6;
   --cyan: #22d3ee;
   --danger: #f87171;
+  /* One width for every pipeline chip; see .choice below. */
+  --chip-width: 150px;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
@@ -132,6 +134,41 @@ body {
   background: #04060b;
 }
 
+/* SVG renderer output: the third backend paints retained-mode DOM instead of a
+   canvas, so it gets its own layer over the (visibility-hidden) canvas. */
+.stage-svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.stage-svg .wave-fill {
+  fill: url(#wave-gradient);
+  opacity: 0.62;
+  filter: drop-shadow(0 0 14px rgba(120, 180, 255, 0.4));
+}
+
+.stage-svg .wave-rim {
+  fill: none;
+  stroke: rgba(210, 236, 255, 0.5);
+  stroke-width: 1.2;
+}
+
+.stage-svg .wave-grid {
+  fill: none;
+  stroke: rgba(96, 120, 190, 0.1);
+  stroke-width: 1;
+}
+
+.stage-svg .wave-centre {
+  fill: none;
+  stroke: rgba(110, 140, 230, 0.22);
+  stroke-width: 1;
+}
+
 .stage-note {
   position: absolute;
   inset: 0;
@@ -188,18 +225,262 @@ body {
   border: 0;
 }
 
-/* ---- controls ----------------------------------------------------------- */
+/* ---- pipeline ----------------------------------------------------------- */
 
-.controls {
+.pipeline {
+  position: relative;
+  /* 0..1, written per frame by src/ui/pipeline-accent.ts. Read by the chip and
+     trace accents below; absent (0) when paused or silent. */
+  --level: 0;
+  /* Fallback accent; each column overrides it in reading order. */
+  --accent: 34 211 238;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background:
+    radial-gradient(700px 240px at 12% -20%, rgba(124, 77, 255, 0.08), transparent 70%),
+    linear-gradient(180deg, rgba(16, 20, 32, 0.85), rgba(8, 10, 17, 0.92));
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.4),
+    0 1px 0 rgba(255, 255, 255, 0.03) inset;
+}
+
+.pipe-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 18px;
+  margin-bottom: 14px;
+}
+
+
+/* The three layers, spread across the panel so the trace has room between the
+   columns. `pipeline-trace.ts` measures the selected chips and writes the SVG
+   that stretches through the gaps. */
+.bus {
+  position: relative;
+  display: grid;
+  grid-template-columns: max-content max-content max-content;
+  justify-content: space-between;
+  align-items: start;
+  gap: 0 72px;
+  /* Room for the trace to leave the last column toward the stage. */
+  padding-right: 56px;
+}
+
+.column {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 9px;
+}
+
+/* Chip accent follows horizontal position, matching the trace gradient. */
+.column[data-layer="entry"] {
+  --accent: 139 92 246;
+}
+
+.column[data-layer="tap"] {
+  --accent: 79 156 248;
+}
+
+.column[data-layer="renderer"] {
+  --accent: 34 211 238;
+}
+
+.layer-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.layer-head .num {
+  color: rgb(var(--accent));
+}
+
+.layer-head .layer-hint {
+  color: var(--faint);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+/* ---- pipeline chips ----------------------------------------------------- */
+
+.choice {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: var(--chip-width);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--muted);
+  padding: 7px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  /* border-color and box-shadow are also driven by --level every frame; a
+     transition on them would lag behind the audio, so they change instantly. */
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease,
+    transform 60ms ease;
+}
+
+.choice::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: rgb(var(--accent));
+  opacity: 0.5;
+}
+
+.choice:hover:not(:disabled) {
+  color: var(--text);
+  border-color: #2b3450;
+  background: #111624;
+}
+
+.choice:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.choice:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.choice:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.choice[aria-pressed="true"] {
+  color: #eafdff;
+  border-color: rgb(var(--accent) / calc(0.45 + var(--level) * 0.33));
+  background: linear-gradient(
+    180deg,
+    rgb(var(--accent) / 0.16),
+    rgb(var(--accent) / 0.07)
+  );
+  box-shadow:
+    0 0 0 1px rgb(var(--accent) / calc(0.1 + var(--level) * 0.14)) inset,
+    0 6px 20px rgb(var(--accent) / calc(0.09 + var(--level) * 0.3));
+}
+
+.choice[aria-pressed="true"]::before {
+  opacity: 1;
+  /* The dot is the LED: fixed size, driven by brightness and halo spread. Its
+     core brightens towards white while the halo keeps the column's hue, so a
+     loud moment reads as a hot point with a saturated bloom, not a pale dot. */
+  background: color-mix(in srgb, rgb(var(--accent)), white calc(var(--level) * 100%));
+  box-shadow:
+    0 0 calc(4px + var(--level) * 20px) rgb(var(--accent) / calc(0.55 + var(--level) * 0.45)),
+    0 0 calc(1px + var(--level) * 7px) calc(0.2px + var(--level) * 1.6px)
+      rgb(var(--accent) / calc(0.2 + var(--level) * 0.5));
+}
+
+/* ---- pipeline trace (SVG overlay, positioned by pipeline-trace.ts) ------ */
+
+.route {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.route-glow {
+  fill: none;
+  stroke: url(#flow);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: calc(0.2 + var(--level) * 0.26);
+  filter: blur(3px);
+}
+
+.route-line {
+  fill: none;
+  stroke: url(#flow);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: calc(0.82 + var(--level) * 0.18);
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.42));
+}
+
+.route-pulse {
+  fill: none;
+  stroke: #f2ffff;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-dasharray: 0.1 52;
+  opacity: calc(0.72 + var(--level) * 0.28);
+  animation: route-flow 2.4s linear infinite;
+}
+
+.route-pulse.pulse-2 {
+  animation-delay: -1.2s;
+  opacity: calc(0.42 + var(--level) * 0.3);
+}
+
+@keyframes route-flow {
+  to {
+    stroke-dashoffset: -52.1;
+  }
+}
+
+.route-node {
+  fill: #070a12;
+  stroke: url(#flow);
+  stroke-width: 2;
+}
+
+/* ---- transport ---------------------------------------------------------- */
+
+.transport {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  padding: 12px;
+  padding: 10px 12px;
   border: 1px solid var(--line-soft);
   border-radius: 14px;
   background: linear-gradient(180deg, rgba(16, 20, 32, 0.9), rgba(9, 11, 18, 0.9));
 }
+
+.transport-note {
+  margin-left: auto;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ---- buttons ------------------------------------------------------------ */
 
 .button {
   appearance: none;
@@ -230,14 +511,12 @@ body {
   transform: translateY(1px);
 }
 
-.button:focus-visible,
-.choice:focus-visible {
+.button:focus-visible {
   outline: 2px solid var(--cyan);
   outline-offset: 2px;
 }
 
-.button:disabled,
-.choice:disabled {
+.button:disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -259,55 +538,6 @@ body {
 
 .button.primary[data-state="playing"] {
   box-shadow: 0 6px 24px rgba(34, 211, 238, 0.28);
-}
-
-.group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px;
-  border: 1px solid var(--line-soft);
-  border-radius: 11px;
-  background: var(--bg-inset);
-}
-
-.group-label {
-  padding: 0 6px 0 8px;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.choice {
-  appearance: none;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  padding: 6px 11px;
-  font-family: var(--mono);
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    box-shadow 120ms ease,
-    opacity 120ms ease;
-}
-
-.choice:hover:not(:disabled) {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.choice[aria-pressed="true"] {
-  border-color: rgba(34, 211, 238, 0.45);
-  background: rgba(34, 211, 238, 0.1);
-  color: #bff9ff;
-  box-shadow: 0 0 14px rgba(34, 211, 238, 0.1) inset;
 }
 
 /* ---- readout / errors panels ------------------------------------------- */
@@ -412,6 +642,25 @@ body {
   }
 }
 
+/* No room for a left-to-right trace once the columns stack; the selected chips
+   and the live readout carry the path instead. */
+@media (max-width: 900px) {
+  .bus {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    padding-right: 0;
+  }
+
+  .options {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .route {
+    display: none;
+  }
+}
+
 @media (max-width: 700px) {
   .app {
     padding: 18px 14px 32px;
@@ -425,8 +674,8 @@ body {
     height: clamp(190px, 34vh, 300px);
   }
 
-  .controls {
-    gap: 8px;
+  .transport-note {
+    margin-left: 0;
   }
 
   .readout {
@@ -439,6 +688,10 @@ body {
   .choice,
   .stage-note {
     transition: none;
+  }
+
+  .route-pulse {
+    display: none;
   }
 }
 

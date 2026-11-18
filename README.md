@@ -1,31 +1,40 @@
 # wave-gpu
 
-Play audio in the browser, read the same samples, and draw them with WebGPU.
+Play audio in the browser, read the same samples, and draw them three different ways.
 
 Live demo: <https://wave.ltlian.com>
 
-![wave-gpu running: WebGPU waveform, the bundled track playing through the element entry point, SAB ring live](docs/demo.png)
+![wave-gpu running: the three-column pipeline with element → worklet → webgpu selected, the trace rising from the columns into the waveform frame, and the live WebGPU waveform](docs/demo.png)
 
 Four interchangeable ways of getting audio into the Web Audio graph — an `<audio>` element, a fully
 decoded `AudioBuffer`, raw PCM over HTTP, and a dropped local file — feed the same tap, which drives
-a WebGPU waveform. The demo track is a bundled MP3 (generated with YuE2, see
-[CREDITS.md](CREDITS.md)); the raw-PCM entry plays a synthesized 12 s loop instead, because raw f32
-of the full track would be ~80 MB.
+a three-column pipeline: entry point → read path → renderer. The selected route is traced between
+the columns and up into the waveform frame, which can be drawn by WebGPU, Canvas2D or SVG. The demo track is a bundled MP3
+(generated with YuE2, see [CREDITS.md](CREDITS.md)); the raw-PCM entry plays a synthesized 12 s loop
+instead, because raw f32 of the full track would be ~80 MB.
+
+The same frame, drawn by the SVG backend instead of WebGPU:
+
+![wave-gpu's third renderer: the same waveform drawn as SVG paths](docs/demo-svg.png)
 
 ## Features
 
 - Four entry points, switchable while audio plays.
 - Two read paths: an `AnalyserNode` and an `AudioWorklet` with a `SharedArrayBuffer` ring (falls
   back to `postMessage` without cross-origin isolation).
-- One WebGPU consumer: 2048-sample frame → compute pass → WGSL waveform, with a Canvas2D fallback
-  you can switch to from the renderer control, and a display-only auto-gain.
-- Live readout of the context, both taps, the PCM stream and the GPU, plus a `window.__wave` probe.
+- Three renderers for the same 2048-sample frame: WebGPU (compute pass → WGSL), Canvas2D (paths),
+  and a retained-mode SVG/DOM layer — switchable while audio plays, with a display-only auto-gain.
+- A pipeline panel: one column per layer, with the selected route traced between them and into the
+  waveform frame.
+- Sound-reactive accents: the selected chips' LED dots, their glow and the trace follow the live
+  output level (paint-only, one frame-loop write; static under `prefers-reduced-motion`).
+- Live readout of the context, both taps, the PCM stream and the renderer, plus a `window.__wave` probe.
 
 ## Requirements
 
 - Node 24 or newer (CI uses 26).
 - A WebGPU-capable browser (verified in Chrome); without WebGPU the visualization falls back to
-  Canvas2D and the renderer control shows WebGPU as unavailable.
+  Canvas2D, the renderer control disables WebGPU, and SVG stays selectable.
 - Cross-origin isolation for the `SharedArrayBuffer` ring — the dev server and
   [public/_headers](public/_headers) set the COOP/COEP headers for you.
 
@@ -36,9 +45,9 @@ npm install
 npm run dev        # http://127.0.0.1:5173
 ```
 
-Press **Start**, then switch **entry point** and **read path** while it plays, or drop an audio file
-on the page to use it as the source. One Vite process serves both the app and the audio endpoints
-(`/api/meta`, `/stream/pcm`).
+Press **Start**, then switch **entry point**, **read path** or **renderer** while it plays, or drop
+an audio file on the page to use it as the source (the `file` layer opens the picker when nothing is
+loaded). One Vite process serves both the app and the audio endpoints (`/api/meta`, `/stream/pcm`).
 
 ```bash
 npm test           # node:test — synth, PCM chunking, display gain
@@ -65,7 +74,7 @@ isolation headers come from [public/_headers](public/_headers).
 ```
 src/audio/sources/      the four entry points
 src/audio/taps/         the two read paths
-src/gpu/                WebGPU and Canvas2D renderers (switchable at runtime)
+src/gpu/                three renderers: WebGPU, Canvas2D, SVG (switchable at runtime)
 server/                 dev-server audio endpoints (synth, PCM stream)
 scripts/build-audio.ts  build-time audio assets for the deployed site
 shared/audio.ts         constants shared by the browser app and the server

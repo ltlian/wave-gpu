@@ -3,8 +3,8 @@
  *
  * The page never parses the file: it only hands a `File` to the engine, which
  * wraps it in a blob URL. This module is responsible for the two ways a local
- * file can arrive (drag-and-drop, and the picker button / hidden input) and for
- * the visual drag-over state.
+ * file can arrive (drag-and-drop, and the hidden input opened by the `file`
+ * layer button) and for the visual drag-over state.
  */
 
 export interface FileDropOptions {
@@ -13,7 +13,7 @@ export interface FileDropOptions {
 }
 
 export interface FileDrop {
-  /** Open the OS file picker (used by the "file" entry button when nothing is loaded). */
+  /** Open the OS file picker (used by the `file` layer when nothing is loaded). */
   openPicker(): void;
 }
 
@@ -24,7 +24,6 @@ function hasFiles(event: DragEvent): boolean {
 
 export function createFileDrop(doc: Document, options: FileDropOptions): FileDrop {
   const input = doc.querySelector<HTMLInputElement>('#file-input');
-  const button = doc.querySelector<HTMLButtonElement>('#load-file');
   const stage = doc.querySelector<HTMLElement>('.stage');
 
   let dragDepth = 0;
@@ -38,8 +37,6 @@ export function createFileDrop(doc: Document, options: FileDropOptions): FileDro
     input.value = ''; // allow picking the same file again
     input.click();
   }
-
-  button?.addEventListener('click', openPicker);
 
   input?.addEventListener('change', () => {
     const file = input.files?.[0];

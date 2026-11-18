@@ -16,8 +16,8 @@ export type EntryPointId = (typeof ENTRY_POINT_IDS)[number];
 export const TAP_IDS = ['worklet', 'analyser'] as const;
 export type TapId = (typeof TAP_IDS)[number];
 
-/** The two drawing backends; the user can switch between them at runtime. */
-export const RENDERER_IDS = ['webgpu', '2d'] as const;
+/** The drawing backends; the user can switch between them at runtime. */
+export const RENDERER_IDS = ['webgpu', '2d', 'svg'] as const;
 export type RendererId = (typeof RENDERER_IDS)[number];
 
 export interface SourceStats {
@@ -140,10 +140,9 @@ export interface ReadoutState {
   analyserPeak: number;
   streamBytes: number;
   streamChunks: number;
-  gpuBackend: string;
-  gpuReady: boolean;
-  /** Whether the WebGPU backend is selectable at all (for the badge tone). */
-  webgpuAvailable: boolean;
+  /** Which renderer is drawing ('webgpu' | '2d' | 'svg'). */
+  rendererBackend: string;
+  rendererReady: boolean;
   displayGain: number;
   fps: number;
 }

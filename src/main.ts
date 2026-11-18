@@ -14,6 +14,8 @@ import { createVisualizer } from './gpu/visualizer.ts';
 import { createControls } from './ui/controls.ts';
 import { createErrorStrip } from './ui/errors.ts';
 import { createFileDrop } from './ui/file-drop.ts';
+import { createPipelineAccent } from './ui/pipeline-accent.ts';
+import { createPipelineTrace } from './ui/pipeline-trace.ts';
 import { createReadout } from './ui/readout.ts';
 import { installDebugHook } from './debug.ts';
 import { STREAM_LOOP_LABEL, TRACK_LABEL } from './audio/tracks.ts';
@@ -76,6 +78,8 @@ const controls = createControls(document, {
   },
 });
 const readout = createReadout(document);
+const trace = createPipelineTrace(document);
+const accent = createPipelineAccent(document);
 
 /** What is audible, as opposed to how it got there (`entry`). */
 function describeTrack(entry: EntryPointId | null): string {
@@ -188,9 +192,8 @@ function updateReadout(): void {
     analyserPeak: analyser?.peak ?? 0,
     streamBytes: engine.stats.bytes,
     streamChunks: engine.stats.chunks,
-    gpuBackend: visualizer.backend,
-    gpuReady: visualizer.ready,
-    webgpuAvailable: visualizer.webgpuAvailable,
+    rendererBackend: visualizer.backend,
+    rendererReady: visualizer.ready,
     displayGain: visualizer.displayGain,
     fps,
   };
@@ -200,6 +203,7 @@ function updateReadout(): void {
   controls.setTap(engine.activeTap);
   controls.setRenderer(visualizer.backend);
   controls.setRendererAvailable('webgpu', visualizer.webgpuAvailable, visualizer.webgpuUnavailableReason);
+  trace.update();
 }
 
 installDebugHook({
@@ -233,7 +237,9 @@ function measure(samples: Float32Array): { rms: number; peak: number } {
 function tick(now: number): void {
   const live = engine.readFrame(frame);
   if (!live) idlePreview.write(frame, now);
-  visualizer.render(frame, live ? measure(frame) : { rms: 0, peak: 0 });
+  const meta = live ? measure(frame) : { rms: 0, peak: 0 };
+  visualizer.render(frame, meta);
+  accent.update(meta.rms, meta.peak, now);
 
   framesSinceSample += 1;
   const elapsed = now - sampledAt;

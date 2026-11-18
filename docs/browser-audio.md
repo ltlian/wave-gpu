@@ -7,7 +7,7 @@ for a similar experiment.
 
 1. **Ingest / playback** — where the audio comes from.
 2. **Tap / read** — how you get at the samples while it plays.
-3. **Consume** — what you do with them (here: a WebGPU shader).
+3. **Consume** — what you do with them (here: WebGPU, Canvas2D or SVG).
 
 The layers are independent. A tap reads whatever arrives at a node in the Web Audio graph, so one
 read path can serve every ingest path. **Streaming from a server is normal and fully supported**;

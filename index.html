@@ -11,7 +11,7 @@
     <title>wave-gpu — play audio, read samples, draw them</title>
     <meta
       name="description"
-      content="Play audio in the browser and read the same samples to drive a WebGPU waveform."
+      content="Play audio in the browser and read the same samples to drive a waveform through three interchangeable renderers."
     />
   </head>
   <body>
@@ -20,25 +20,83 @@
         <div>
           <h1>Play audio. Read the samples. Draw them.</h1>
           <p class="subtitle">
-            Four entry points, two read paths, one WebGPU visualizer — switch any of them, or drop
-            in an audio file of your own.
+            Four entry points, two read paths, three renderers. Pick one per layer — the trace joins
+            the selected path, and any of them can change while the audio plays.
           </p>
         </div>
         <div class="badges" aria-live="polite">
           <span class="badge" data-badge="context">context: idle</span>
-          <span class="badge" data-badge="gpu">gpu: starting…</span>
+          <span class="badge" data-badge="renderer">renderer: starting…</span>
           <span class="badge" data-badge="ring">ring: —</span>
         </div>
       </header>
 
-      <section class="stage" aria-label="WebGPU waveform">
+      <section class="stage" aria-label="Waveform output">
         <canvas id="stage"></canvas>
-        <p class="stage-note" id="stage-note">press start to hear the synth loop</p>
+        <p class="stage-note" id="stage-note">press start to hear the demo track</p>
       </section>
 
-      <section class="controls" aria-label="Playback controls">
+      <section class="pipeline" id="pipeline" aria-label="Pipeline">
+        <div class="pipe-head">
+          <h2 class="panel-title">pipeline</h2>
+        </div>
+
+        <div class="bus" id="bus">
+          <svg class="route" id="route" aria-hidden="true">
+            <defs>
+              <linearGradient id="flow" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1100" y2="0">
+                <stop offset="0" stop-color="#8b5cf6" />
+                <stop offset="0.55" stop-color="#4f9cf8" />
+                <stop offset="1" stop-color="#22d3ee" />
+              </linearGradient>
+            </defs>
+            <path class="route-glow" id="route-glow" />
+            <path class="route-line" id="route-line" />
+            <path class="route-pulse" id="route-pulse" />
+            <path class="route-pulse pulse-2" id="route-pulse-2" />
+            <g id="route-nodes"></g>
+          </svg>
+
+          <div class="column" data-layer="entry" role="group" aria-label="Entry point">
+            <h3 class="layer-head">
+              <span class="num">01</span><span>entry point</span>
+              <span class="layer-hint">ingest</span>
+            </h3>
+            <div class="options">
+              <button class="choice" type="button" data-entry="element">element</button>
+              <button class="choice" type="button" data-entry="decode">decode</button>
+              <button class="choice" type="button" data-entry="stream">stream</button>
+              <button class="choice" type="button" data-entry="file">file</button>
+            </div>
+          </div>
+
+          <div class="column" data-layer="tap" role="group" aria-label="Read path">
+            <h3 class="layer-head">
+              <span class="num">02</span><span>read path</span>
+              <span class="layer-hint">tap</span>
+            </h3>
+            <div class="options">
+              <button class="choice" type="button" data-tap="worklet">worklet</button>
+              <button class="choice" type="button" data-tap="analyser">analyser</button>
+            </div>
+          </div>
+
+          <div class="column" data-layer="renderer" role="group" aria-label="Renderer">
+            <h3 class="layer-head">
+              <span class="num">03</span><span>renderer</span>
+              <span class="layer-hint">consume</span>
+            </h3>
+            <div class="options">
+              <button class="choice" type="button" data-renderer="webgpu">webgpu</button>
+              <button class="choice" type="button" data-renderer="2d">canvas2d</button>
+              <button class="choice" type="button" data-renderer="svg">svg</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="transport" aria-label="Playback controls">
         <button id="start" class="button primary" type="button">Start</button>
-        <button id="load-file" class="button" type="button">Load file…</button>
         <input
           id="file-input"
           class="visually-hidden"
@@ -46,26 +104,9 @@
           accept="audio/*"
           aria-label="Audio file"
         />
-
-        <div class="group" role="group" aria-label="Entry point">
-          <span class="group-label">entry point</span>
-          <button class="choice" type="button" data-entry="element">element</button>
-          <button class="choice" type="button" data-entry="decode">decode</button>
-          <button class="choice" type="button" data-entry="stream">stream</button>
-          <button class="choice" type="button" data-entry="file">file</button>
-        </div>
-
-        <div class="group" role="group" aria-label="Read path">
-          <span class="group-label">read path</span>
-          <button class="choice" type="button" data-tap="worklet">worklet</button>
-          <button class="choice" type="button" data-tap="analyser">analyser</button>
-        </div>
-
-        <div class="group" role="group" aria-label="Renderer">
-          <span class="group-label">renderer</span>
-          <button class="choice" type="button" data-renderer="webgpu">webgpu</button>
-          <button class="choice" type="button" data-renderer="2d">canvas2d</button>
-        </div>
+        <p class="transport-note">
+          drop an audio file anywhere on the page · the file layer opens the picker
+        </p>
       </section>
 
       <section class="panel" aria-label="Live readout">
@@ -85,7 +126,7 @@
           <div><dt>worklet rms / peak</dt><dd data-field="worklet-level">—</dd></div>
           <div><dt>analyser rms / peak</dt><dd data-field="analyser-level">—</dd></div>
           <div><dt>stream bytes</dt><dd data-field="stream-stats">—</dd></div>
-          <div><dt>gpu</dt><dd data-field="gpu">—</dd></div>
+          <div><dt>renderer</dt><dd data-field="renderer">—</dd></div>
           <div><dt>display gain</dt><dd data-field="display-gain">—</dd></div>
           <div><dt>fps</dt><dd data-field="fps">—</dd></div>
         </dl>

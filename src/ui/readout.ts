@@ -89,7 +89,7 @@ export function createReadout(root: ParentNode): Readout {
     setField('worklet-level', formatLevel(state.workletRms, state.workletPeak));
     setField('analyser-level', formatLevel(state.analyserRms, state.analyserPeak));
     setField('stream-stats', formatStreamStats(state.streamBytes, state.streamChunks));
-    setField('gpu', `${state.gpuBackend}${state.gpuReady ? ' · ready' : ' · not ready'}`);
+    setField('renderer', `${state.rendererBackend}${state.rendererReady ? ' · ready' : ' · not ready'}`);
     setField('display-gain', `×${state.displayGain.toFixed(1)}`);
     setField('fps', Number.isFinite(state.fps) ? String(Math.round(state.fps)) : NO_VALUE);
 
@@ -99,13 +99,13 @@ export function createReadout(root: ParentNode): Readout {
       state.contextState === 'running' ? 'live' : contextIdle ? 'neutral' : 'warn',
     );
     setBadge(
-      'gpu',
-      `gpu: ${state.gpuBackend}${state.gpuReady ? '' : ' (not ready)'}`,
-      // Warning is for "WebGPU was wanted but is not usable"; a 2D backend
-      // chosen from the renderer control while WebGPU works is neutral.
-      state.gpuReady && state.gpuBackend === 'webgpu'
+      'renderer',
+      `renderer: ${state.rendererBackend}${state.rendererReady ? '' : ' (not ready)'}`,
+      // Live tone is reserved for the GPU path; picking Canvas2D or SVG is a
+      // deliberate choice, so those read neutral. Warn only when nothing draws.
+      state.rendererReady && state.rendererBackend === 'webgpu'
         ? 'live'
-        : state.gpuReady && state.webgpuAvailable
+        : state.rendererReady
           ? 'neutral'
           : 'warn',
     );

@@ -30,11 +30,15 @@ samples came from an `<audio>` element, a decoded buffer, or a network stream.
                     ┌─────────────────────────── src/gpu/ ─────────────────────────────┐
  consumer           │  webgpu.ts   compute pass: 256 columns → min/max/centre/rms       │
                     │  canvas2d.ts  same picture, drawn with Canvas2D paths              │
+│  svg.ts       same picture, as two retained-mode SVG paths                             │
                     └─────────────────────────────────────────────────────────────────┘
 ```
 
 `src/main.ts` is the only file that knows about all three layers. It builds the engine and the
 visualizer, wires the UI, runs a `requestAnimationFrame` loop, and assembles the readout snapshot.
+`src/ui/pipeline-trace.ts` is the only file that knows the three columns form a path: it measures the
+selected chips, writes the SVG trace between them, and carries it up into the stage's bottom frame,
+reading the selection back from the buttons.
 `src/types.ts` holds the contracts that keep the layers honest:
 
 | Interface | Responsibility |
@@ -56,16 +60,22 @@ visualizer, wires the UI, runs a `requestAnimationFrame` loop, and assembles the
 4. **Each animation frame**, `main.ts` calls `engine.readFrame(buffer)` (active tap), computes raw
    RMS/peak, and calls `visualizer.render(buffer, meta)`. If no audio is flowing, an idle preview
    supplies a synthetic frame — the canvas never goes black.
-5. **The visualizer** applies display-only auto-gain (to a copy), uploads 2048 floats to a GPU
-   storage buffer, runs a compute pass that reduces them to 256 columns, then draws a fullscreen
-   triangle with a fragment shader that reads those columns.
+5. **The visualizer** applies display-only auto-gain (to a copy), then hands the frame to the
+   selected backend. WebGPU uploads 2048 floats to a storage buffer, runs a compute pass that
+   reduces them to 256 columns, and draws a fullscreen triangle with a fragment shader; Canvas2D
+   buckets the same samples into 256 columns and fills a gradient envelope with paths; SVG updates
+   two retained-mode paths on a sibling `<svg>` element.
 6. **The UI** is refreshed at ~10 Hz from the same engine/visualizer state. Errors from any layer
-   go to the error strip (and the `window.__wave` probe).
-7. **The renderer control** switches the visualizer between the WebGPU and Canvas2D backends while
-   it runs. Only the drawing changes: the audio graph, tap selection and readout are untouched.
-   Because a canvas cannot change context type once it has handed one out, a switch swaps in an
-   identical `<canvas>` element (`cloneNode`, which copies the backing-store size). The WebGPU
-   button is disabled, with the failure reason as its tooltip, when the startup attempt failed.
+   go to the error strip (and the `window.__wave` probe). The pipeline panel is the exception: its
+   accents are driven from the 60 fps loop, which writes one CSS custom property (`--level`) that
+   the selected chips and the trace read for glow, so the panel follows the audio rather than the
+   10 Hz readout.
+7. **The renderer column** switches the visualizer between WebGPU, Canvas2D and SVG while it runs.
+   Only the drawing changes: the audio graph, tap selection and readout are untouched. Canvas
+   backends share one `<canvas>`; because a canvas cannot change context type once it has handed one
+   out, a switch swaps in an identical element (`cloneNode`, which copies the backing-store size).
+   SVG mounts a sibling `<svg>` and hides the canvas instead. The WebGPU chip is disabled, with the
+   failure reason as its tooltip, when the startup attempt failed.
 
 ## Interesting details
 
@@ -181,8 +191,9 @@ the production build — audio worklets cannot load that.)
 | `src/gpu/visualizer.ts` | backend selection + runtime switching, errors, display gain |
 | `src/gpu/webgpu.ts`, `shaders.ts` | compute + render pipeline, WGSL |
 | `src/gpu/canvas2d.ts` | Canvas2D renderer (fallback / selectable) |
+| `src/gpu/svg.ts` | SVG/DOM renderer (third selectable consumer) |
 | `src/gpu/display-gain.ts` | pure rolling-peak normalisation (unit-tested) |
-| `src/ui/*.ts` | controls, readout, error strip, file drop/picker (DOM only) |
+| `src/ui/*.ts` | controls, trace/accents, readout, error strip, file drop/picker (DOM only) |
 | `server/audio-plugin.ts` | Vite middleware + audio endpoints |
 | `server/synth.ts`, `assets.ts` | deterministic loop, cached assets |
 | `src/audio/tracks.ts` | the bundled MP3 and the stream loop's labels |

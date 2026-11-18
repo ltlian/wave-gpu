@@ -1,5 +1,5 @@
 /**
- * DOM-only controls: the transport button and the three toggle groups.
+ * DOM-only controls: the transport button and the three layer columns.
  *
  * These functions never talk to the audio engine or the visualizer — they call
  * the callbacks from `main.ts` and otherwise just reflect the state they are
@@ -60,8 +60,8 @@ export function createControls(root: ParentNode, options: ControlOptions): Contr
   let entry: EntryPointId = ENTRY_POINT_IDS[0];
   let tap: TapId = TAP_IDS[0];
   let renderer: RendererId = RENDERER_IDS[0];
-  const rendererAvailable: Record<RendererId, boolean> = { webgpu: true, '2d': true };
-  const rendererReason: Record<RendererId, string | null> = { webgpu: null, '2d': null };
+  const rendererAvailable: Record<RendererId, boolean> = { webgpu: true, '2d': true, svg: true };
+  const rendererReason: Record<RendererId, string | null> = { webgpu: null, '2d': null, svg: null };
 
   function renderStartLabel(): void {
     if (!startButton) return;
