@@ -14,14 +14,17 @@ import type { EntryPointId, RendererId, TapId } from '../types.ts';
 
 export interface ControlOptions {
   onTogglePlayback: () => void;
+  onToggleMute: () => void;
   onEntryPoint: (entry: EntryPointId) => void;
   onTap: (tap: TapId) => void;
   onRenderer: (renderer: RendererId) => void;
 }
 
 export interface Controls {
-  /** Reflect transport state: Start → Pause → Resume. */
+  /** Reflect transport state: Play → Pause → Resume. */
   setPlaying(playing: boolean): void;
+  /** Reflect the output mute state on the speaker button. */
+  setMuted(muted: boolean): void;
   setEntryPoint(id: EntryPointId): void;
   setTap(id: TapId): void;
   setRenderer(id: RendererId): void;
@@ -48,14 +51,16 @@ function isRendererId(value: string | undefined): value is RendererId {
 
 export function createControls(root: ParentNode, options: ControlOptions): Controls {
   const startButton = root.querySelector<HTMLButtonElement>('#start');
+  const muteButton = root.querySelector<HTMLButtonElement>('#mute');
   const entryButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-entry]'));
   const tapButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-tap]'));
   const rendererButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-renderer]'));
   const allButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('button'));
 
   let playing = false;
-  /** Once playback has started the button reads Resume instead of Start. */
+  /** Once playback has started the button reads Resume instead of Play. */
   let started = false;
+  let muted = true;
   let busy = false;
   let entry: EntryPointId = ENTRY_POINT_IDS[0];
   let tap: TapId = TAP_IDS[0];
@@ -65,10 +70,20 @@ export function createControls(root: ParentNode, options: ControlOptions): Contr
 
   function renderStartLabel(): void {
     if (!startButton) return;
-    const label = playing ? 'Pause' : started ? 'Resume' : 'Start';
+    const label = playing ? 'Pause' : started ? 'Resume' : 'Play';
     if (startButton.textContent !== label) startButton.textContent = label;
     const state = playing ? 'playing' : started ? 'paused' : 'idle';
     if (startButton.dataset.state !== state) startButton.dataset.state = state;
+  }
+
+  function renderMute(): void {
+    if (!muteButton) return;
+    const pressed = String(muted);
+    if (muteButton.getAttribute('aria-pressed') !== pressed) {
+      muteButton.setAttribute('aria-pressed', pressed);
+    }
+    const tooltip = muted ? 'Unmute audio' : 'Mute audio';
+    if (muteButton.title !== tooltip) muteButton.title = tooltip;
   }
 
   function renderPressed(): void {
@@ -105,6 +120,10 @@ export function createControls(root: ParentNode, options: ControlOptions): Contr
     if (!busy) options.onTogglePlayback();
   });
 
+  muteButton?.addEventListener('click', () => {
+    if (!busy) options.onToggleMute();
+  });
+
   for (const button of entryButtons) {
     button.addEventListener('click', () => {
       if (busy) return;
@@ -133,12 +152,17 @@ export function createControls(root: ParentNode, options: ControlOptions): Contr
 
   renderStartLabel();
   renderPressed();
+  renderMute();
 
   return {
     setPlaying(value: boolean): void {
       playing = value;
       if (value) started = true;
       renderStartLabel();
+    },
+    setMuted(value: boolean): void {
+      muted = value;
+      renderMute();
     },
     setEntryPoint(id: EntryPointId): void {
       entry = id;

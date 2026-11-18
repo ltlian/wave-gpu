@@ -12,6 +12,7 @@ export interface ProbeSnapshot {
   file: FileInfo | null;
   tap: TapId;
   playing: boolean;
+  muted: boolean;
   context: {
     state: AudioContextState | 'none';
     sampleRate: number;
@@ -50,6 +51,7 @@ export interface WaveDebugApi {
   start(entry?: EntryPointId): Promise<void>;
   setEntryPoint(entry: EntryPointId): Promise<void>;
   setTap(tap: TapId): void;
+  setMuted(muted: boolean): void;
   pause(): Promise<void>;
   resume(): Promise<void>;
 }
@@ -73,6 +75,7 @@ export function installDebugHook(deps: DebugDeps): void {
       file: engine.file,
       tap: engine.activeTap,
       playing: deps.isPlaying(),
+      muted: engine.muted,
       context: {
         state: context?.state ?? 'none',
         sampleRate: context?.sampleRate ?? 0,
@@ -114,6 +117,9 @@ export function installDebugHook(deps: DebugDeps): void {
     },
     setTap(tap) {
       engine.setTap(tap);
+    },
+    setMuted(muted) {
+      engine.setMuted(muted);
     },
     async pause() {
       await engine.pause();

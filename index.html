@@ -89,7 +89,42 @@
       </section>
 
       <section class="transport" aria-label="Playback controls">
-        <button id="start" class="button primary" type="button">Start</button>
+        <button id="start" class="button primary" type="button">Play</button>
+        <button
+          id="mute"
+          class="button mute-button"
+          type="button"
+          aria-pressed="true"
+          aria-label="Mute audio"
+          title="Unmute audio"
+        >
+          <svg
+            class="mute-icon mute-icon-on"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4.5 9.5h3.2L12 5.8v12.4l-4.3-3.7H4.5z" />
+            <path d="M15.4 9.2a4.8 4.8 0 0 1 0 5.6" />
+          </svg>
+          <svg
+            class="mute-icon mute-icon-off"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4.5 9.5h3.2L12 5.8v12.4l-4.3-3.7H4.5z" />
+            <path d="M4 4l16 16" />
+          </svg>
+        </button>
         <input
           id="file-input"
           class="visually-hidden"

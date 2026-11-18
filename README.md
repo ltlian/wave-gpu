@@ -31,6 +31,8 @@ The same frame, drawn by the SVG backend instead of WebGPU:
   `?quality=low` (or `?quality=high` to compare).
 - Sound-reactive accents: the selected chips' LED dots, their glow and the trace follow the live
   output level (paint-only, one frame-loop write; static under `prefers-reduced-motion`).
+- Audio output starts muted: the speaker button beside Play is the only way to turn the sound on,
+  while the taps (and therefore the waveform) keep reading the signal.
 - Live readout of the context, both taps, the PCM stream and the renderer, plus a `window.__wave` probe.
 
 ## Requirements
@@ -48,7 +50,7 @@ npm install
 npm run dev        # http://127.0.0.1:5173
 ```
 
-Press **Start**, then switch **entry point**, **read path** or **renderer** while it plays, or drop
+Press **Play**, then switch **entry point**, **read path** or **renderer** while it plays, or drop
 an audio file on the page to use it as the source (the `file` layer opens the picker when nothing is
 loaded). One Vite process serves both the app and the audio endpoints (`/api/meta`, `/stream/pcm`).
 

@@ -547,6 +547,39 @@ body.low-quality .route-pulse.pulse-2 {
   box-shadow: 0 6px 24px rgba(34, 211, 238, 0.28);
 }
 
+/* Icon-only speaker toggle next to Play; muted by default. */
+.mute-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.mute-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mute-button .mute-icon-off {
+  display: none;
+}
+
+.mute-button[aria-pressed="true"] .mute-icon-on {
+  display: none;
+}
+
+.mute-button[aria-pressed="true"] .mute-icon-off {
+  display: block;
+}
+
+.mute-button[aria-pressed="false"] {
+  border-color: rgba(34, 211, 238, 0.35);
+  color: #bff9ff;
+}
+
 /* ---- readout / errors panels ------------------------------------------- */
 
 .panel,

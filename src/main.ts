@@ -58,6 +58,10 @@ const controls = createControls(document, {
   onTogglePlayback: () => {
     void togglePlayback();
   },
+  onToggleMute: () => {
+    engine.setMuted(!engine.muted);
+    controls.setMuted(engine.muted);
+  },
   onEntryPoint: (entry) => {
     // The "file" button has no audio of its own until something is loaded.
     if (entry === 'file' && engine.file === null) {
@@ -202,6 +206,7 @@ function updateReadout(): void {
   };
   readout.update(state);
   controls.setPlaying(playing);
+  controls.setMuted(engine.muted);
   controls.setEntryPoint(engine.activeEntry ?? 'element');
   controls.setTap(engine.activeTap);
   controls.setRenderer(visualizer.backend);

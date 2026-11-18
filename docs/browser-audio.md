@@ -102,7 +102,7 @@ samples*, and it keeps the example dependency-free. For a real app, codec-compre
 ## Gotchas worth knowing
 
 - **Autoplay.** `AudioContext` starts suspended and `play()` can reject without a user gesture.
-  This demo only creates the context from the Start button (or `window.__wave.start()` in
+  This demo only creates the context from the Play button (or `window.__wave.start()` in
   automation) and resumes it there.
 - **Sample rates are not uniform.** The device/context rate is often 44.1 or 48 kHz; browsers
   resample. This demo's source is 48 kHz but the context may come up at 44100 Hz — the readout

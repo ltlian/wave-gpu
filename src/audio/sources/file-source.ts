@@ -115,7 +115,7 @@ export function createFileSource(onError: (message: string) => void = () => {}):
         await element.play();
       } catch (error) {
         if (stopping) return; // pause() interrupted the pending play(): expected
-        const message = `file playback was blocked (${describeError(error)}) — press Start again after interacting with the page`;
+        const message = `file playback was blocked (${describeError(error)}) — press Play again after interacting with the page`;
         onError(message);
         throw new Error(message);
       }

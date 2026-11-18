@@ -19,7 +19,7 @@ samples came from an `<audio>` element, a decoded buffer, or a network stream.
                     │  sources/stream-source.ts    fetch raw f32le + schedule buffers   │
                     │  sources/file-source.ts      dropped file → blob: URL → <audio>   │
                     └───────────────────────────────┬──────────────────────────────────┘
-                                                    │ source → masterGain (0.35)
+                                                    │ source → masterGain (0.35) → outputGain → destination
                                                     ▼
                     ┌─────────────────────────── src/audio/ ───────────────────────────┐
  read path (tap)    │  taps/analyser-tap.ts   AnalyserNode, latest 2048-frame window     │
@@ -47,18 +47,20 @@ reading the selection back from the buttons.
 |---|---|
 | `AudioSource` | one ingest implementation: `start(ctx, destination)`, `stop()`, optional network stats |
 | `SampleTap` | one read implementation: `attach(master, destination)`, `read(out)`, live rms/peak/blocks |
-| `AudioEngine` | owns the context + master gain + sources + taps; switches entry points; pause/resume |
+| `AudioEngine` | owns the context, master gain, output gain, sources and taps; switches entry points; pause/resume/mute |
 | `Visualizer` | draws a frame of samples; reports backend, errors, frames, display gain |
 
 ## Runtime flow
 
 1. **Nothing is created until a user gesture.** `main.ts` calls `engine.start(entry)` from the
-   Start button. `ensureContext()` creates the `AudioContext` (interactive latency hint), the
-   master gain, both taps, and resumes the context.
+   Play button. `ensureContext()` creates the `AudioContext` (interactive latency hint), the
+   master gain, the output gain (0 by default), both taps, and resumes the context.
 2. **The engine starts one source.** `element`, `decode`, `stream` or `file` — each owns its own
    resources. Sources connect to `masterGain`; switching stops the previous source first.
-3. **Both taps sit on `masterGain`, always.** The analyser branch is passive. The worklet tap
-   reads through a silent `GainNode(0)` → `destination` so the graph keeps pulling it.
+3. **Both taps sit on `masterGain`, always, before the output gain.** The analyser branch is
+   passive. The worklet tap reads through a silent `GainNode(0)` → `destination` so the graph keeps
+   pulling it. `outputGain` after the taps starts at 0; the speaker control next to Play ramps it
+   to 1, so audio is opt-in while the visualization runs either way.
 4. **While audio plays and the stage is on screen**, `render-loop.ts` runs an animation frame loop
    that calls `engine.readFrame(buffer)` (active tap), computes raw RMS/peak, and calls
    `visualizer.render(buffer, meta)`. When paused, or when the stage is scrolled out of view, the

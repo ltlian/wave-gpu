@@ -4,14 +4,15 @@
  *
  *                           ┌─ analyser tap  (poll getFloatTimeDomainData)
  *   source ─▶ masterGain ───┼─ worklet tap   (SAB ring / postMessage)
- *   (element | decode |      └─ destination  (audible, gain 0.35)
- *    stream)
+ *   (element | decode |      │
+ *    stream)                 └─ outputGain ─▶ destination  (starts muted)
  *
  * The graph is lazy because an AudioContext cannot reliably start without a
  * user gesture: the first `start()`/`resume()` — which the UI calls from a
  * click — creates it. Both taps are attached at that point; switching taps only
  * changes which one `readFrame()` reads, so the audio path never stutters for a
- * readout change.
+ * readout change. `outputGain` sits after the taps and starts at 0, so arriving
+ * at the page never produces sound unless the UI's speaker control is used.
  *
  * Source switches are serialised: the previous source is stopped before the
  * next one starts, so there is never more than one source feeding the gain.
@@ -31,7 +32,7 @@ import type { WorkletTap } from './taps/worklet-tap.ts';
 
 /** Master gain: headroom for the bundled track and the full-scale synth loop. */
 const MASTER_GAIN = 0.35;
-/** Entry point used by the first Start click (before one is chosen). */
+/** Entry point used by the first Play click (before one is chosen). */
 const DEFAULT_ENTRY: EntryPointId = 'element';
 const DEFAULT_TAP: TapId = 'worklet';
 const ZERO_STATS: SourceStats = { bytes: 0, chunks: 0 };
@@ -52,6 +53,9 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
   let context: AudioContext | null = null;
   let contextPromise: Promise<AudioContext> | null = null;
   let masterGain: GainNode | null = null;
+  let outputGain: GainNode | null = null;
+  /** Audio output is muted until the user turns the speaker on. */
+  let muted = true;
   let analyserTap: SampleTap | null = null;
   let workletTap: WorkletTap | null = null;
   let fileSource: FileSource | null = null;
@@ -103,7 +107,11 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
 
     masterGain = created.createGain();
     masterGain.gain.value = MASTER_GAIN;
-    masterGain.connect(created.destination);
+
+    outputGain = created.createGain();
+    outputGain.gain.value = muted ? 0 : 1;
+    masterGain.connect(outputGain);
+    outputGain.connect(created.destination);
 
     // Attach both taps eagerly so a tap switch never has to touch the graph.
     const analyser = createAnalyserTap();
@@ -200,7 +208,7 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
     try {
       if (ctx.state !== 'running') await ctx.resume();
     } catch (error) {
-      onError(`AudioContext.resume() was blocked (${describeError(error)}) — press Start again`);
+      onError(`AudioContext.resume() was blocked (${describeError(error)}) — press Play again`);
     }
     if (disposed) return;
     if (activeEntry === entry) return; // already the active source
@@ -234,7 +242,7 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
         try {
           await ctx.resume();
         } catch (error) {
-          onError(`AudioContext.resume() was blocked (${describeError(error)}) — press Start again after interacting with the page`);
+          onError(`AudioContext.resume() was blocked (${describeError(error)}) — press Play again after interacting with the page`);
         }
       }
       if (disposed) return;
@@ -290,15 +298,32 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
     try {
       if (ctx.state !== 'running') await ctx.resume();
     } catch (error) {
-      onError(`AudioContext.resume() was blocked (${describeError(error)}) — press Start again after interacting with the page`);
+      onError(`AudioContext.resume() was blocked (${describeError(error)}) — press Play again after interacting with the page`);
     }
-    // The primary Start button calls resume() before any entry point is chosen,
+    // The primary Play button calls resume() before any entry point is chosen,
     // so that first resume also boots the default source.
     if (activeEntry === null) await enqueue(() => startEntry(DEFAULT_ENTRY));
   }
 
   function setTap(tap: TapId): void {
     activeTap = tap;
+  }
+
+  function setMuted(next: boolean): void {
+    if (muted === next) return;
+    muted = next;
+    const ctx = context;
+    const gain = outputGain;
+    if (ctx === null || gain === null) return;
+    const now = ctx.currentTime;
+    try {
+      // A short ramp avoids the click a hard gain jump would make.
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(muted ? 0 : 1, now + 0.03);
+    } catch (error) {
+      onError(`could not change the audio output: ${describeError(error)}`);
+    }
   }
 
   /** Scratch buffer used to refresh the non-active tap (readout only). */
@@ -358,6 +383,14 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
     workletTap?.dispose();
     analyserTap = null;
     workletTap = null;
+    if (outputGain !== null) {
+      try {
+        outputGain.disconnect();
+      } catch {
+        // already disconnected
+      }
+      outputGain = null;
+    }
     if (masterGain !== null) {
       try {
         masterGain.disconnect();
@@ -384,6 +417,9 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
     get paused() {
       return context !== null && context.state === 'suspended';
     },
+    get muted() {
+      return muted;
+    },
     get ring() {
       return workletTap?.ring ?? false;
     },
@@ -399,6 +435,7 @@ export function createAudioEngine(options: AudioEngineOptions): AudioEngine {
     loadFile,
     setEntryPoint,
     setTap,
+    setMuted,
     pause,
     resume,
     readFrame,

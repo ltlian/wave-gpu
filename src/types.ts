@@ -100,6 +100,8 @@ export interface AudioEngine {
   readonly activeEntry: EntryPointId | null;
   readonly activeTap: TapId;
   readonly paused: boolean;
+  /** True while the speakers are muted; the taps still see the signal. */
+  readonly muted: boolean;
   /** True when the worklet tap is running on a SharedArrayBuffer ring. */
   readonly ring: boolean;
   readonly stats: SourceStats;
@@ -111,6 +113,7 @@ export interface AudioEngine {
   loadFile(file: File): Promise<void>;
   setEntryPoint(entry: EntryPointId): Promise<void>;
   setTap(tap: TapId): void;
+  setMuted(muted: boolean): void;
   pause(): Promise<void>;
   resume(): Promise<void>;
   /** Fill `out` from the active tap. False when there is nothing to read yet. */
